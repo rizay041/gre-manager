@@ -1,0 +1,243 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly VERSION="2.1.0"
+readonly CONFIG_DIR="/etc/gre-manager"
+readonly CONFIG_FILE="$CONFIG_DIR/config.conf"
+readonly RULES_FILE="$CONFIG_DIR/rules.conf"
+readonly IFACE="gre-manager"
+readonly NAT_CHAIN="GRE_MANAGER_NAT"
+readonly FWD_CHAIN="GRE_MANAGER_FWD"
+
+LOCAL_IP=""
+REMOTE_IP=""
+GRE_LOCAL=""
+GRE_REMOTE=""
+GRE_PREFIX="30"
+MTU="1400"
+
+die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
+info() { printf '%s\n' "$*"; }
+require_root() { [[ ${EUID:-$(id -u)} -eq 0 ]] || die "run this command as root (sudo gre-manager $*)"; }
+require_command() { command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"; }
+
+valid_ipv4() {
+  local ip=$1 IFS=. octets i
+  [[ $ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+  read -r -a octets <<< "$ip"
+  for i in "${octets[@]}"; do
+    [[ $i =~ ^[0-9]{1,3}$ && 10#$i -le 255 ]] || return 1
+  done
+}
+
+valid_port() { [[ $1 =~ ^[0-9]+$ && 10#$1 -ge 1 && 10#$1 -le 65535 ]]; }
+valid_prefix() { [[ $1 =~ ^[0-9]+$ && 10#$1 -ge 1 && 10#$1 -le 32 ]]; }
+valid_mtu() { [[ $1 =~ ^[0-9]+$ && 10#$1 -ge 576 && 10#$1 -le 9000 ]]; }
+valid_protocol() { [[ $1 == tcp || $1 == udp ]]; }
+
+load_config() {
+  [[ -r $CONFIG_FILE ]] || return 1
+  local key value
+  while IFS='=' read -r key value; do
+    case "$key" in
+      LOCAL_IP) LOCAL_IP=$value ;;
+      REMOTE_IP) REMOTE_IP=$value ;;
+      GRE_LOCAL) GRE_LOCAL=$value ;;
+      GRE_REMOTE) GRE_REMOTE=$value ;;
+      GRE_PREFIX) GRE_PREFIX=$value ;;
+      MTU) MTU=$value ;;
+    esac
+  done < "$CONFIG_FILE"
+  validate_config
+}
+
+validate_config() {
+  valid_ipv4 "$LOCAL_IP" || die "invalid local public IPv4 address"
+  valid_ipv4 "$REMOTE_IP" || die "invalid remote public IPv4 address"
+  valid_ipv4 "$GRE_LOCAL" || die "invalid local tunnel IPv4 address"
+  valid_ipv4 "$GRE_REMOTE" || die "invalid remote tunnel IPv4 address"
+  valid_prefix "$GRE_PREFIX" || die "invalid tunnel prefix"
+  valid_mtu "$MTU" || die "MTU must be between 576 and 9000"
+  [[ $LOCAL_IP != "$REMOTE_IP" ]] || die "public endpoints must be different"
+  [[ $GRE_LOCAL != "$GRE_REMOTE" ]] || die "tunnel endpoints must be different"
+}
+
+save_config() {
+  validate_config
+  install -d -m 700 "$CONFIG_DIR"
+  local tmp
+  tmp=$(mktemp "$CONFIG_DIR/config.XXXXXX")
+  chmod 600 "$tmp"
+  printf 'LOCAL_IP=%s\nREMOTE_IP=%s\nGRE_LOCAL=%s\nGRE_REMOTE=%s\nGRE_PREFIX=%s\nMTU=%s\n' \
+    "$LOCAL_IP" "$REMOTE_IP" "$GRE_LOCAL" "$GRE_REMOTE" "$GRE_PREFIX" "$MTU" > "$tmp"
+  mv -f "$tmp" "$CONFIG_FILE"
+}
+
+remove_runtime_rules() {
+  iptables -t nat -D PREROUTING -j "$NAT_CHAIN" 2>/dev/null || true
+  iptables -D FORWARD -j "$FWD_CHAIN" 2>/dev/null || true
+  iptables -t nat -D POSTROUTING -o "$IFACE" -j MASQUERADE 2>/dev/null || true
+  iptables -t nat -F "$NAT_CHAIN" 2>/dev/null || true
+  iptables -F "$FWD_CHAIN" 2>/dev/null || true
+  iptables -t nat -X "$NAT_CHAIN" 2>/dev/null || true
+  iptables -X "$FWD_CHAIN" 2>/dev/null || true
+}
+
+ensure_runtime_chains() {
+  iptables -t nat -N "$NAT_CHAIN" 2>/dev/null || true
+  iptables -N "$FWD_CHAIN" 2>/dev/null || true
+  iptables -t nat -C PREROUTING -j "$NAT_CHAIN" 2>/dev/null || iptables -t nat -A PREROUTING -j "$NAT_CHAIN"
+  iptables -C FORWARD -j "$FWD_CHAIN" 2>/dev/null || iptables -A FORWARD -j "$FWD_CHAIN"
+  iptables -t nat -C POSTROUTING -o "$IFACE" -j MASQUERADE 2>/dev/null || \
+    iptables -t nat -A POSTROUTING -o "$IFACE" -j MASQUERADE
+}
+
+apply_rule() {
+  local protocol=$1 source_port=$2 destination_port=$3
+  valid_protocol "$protocol" || die "invalid protocol in rules file: $protocol"
+  valid_port "$source_port" || die "invalid source port in rules file: $source_port"
+  valid_port "$destination_port" || die "invalid destination port in rules file: $destination_port"
+  iptables -t nat -C "$NAT_CHAIN" -p "$protocol" --dport "$source_port" \
+    -j DNAT --to-destination "$GRE_REMOTE:$destination_port" 2>/dev/null || \
+    iptables -t nat -A "$NAT_CHAIN" -p "$protocol" --dport "$source_port" \
+      -j DNAT --to-destination "$GRE_REMOTE:$destination_port"
+  iptables -C "$FWD_CHAIN" -p "$protocol" -d "$GRE_REMOTE" --dport "$destination_port" -j ACCEPT 2>/dev/null || \
+    iptables -A "$FWD_CHAIN" -p "$protocol" -d "$GRE_REMOTE" --dport "$destination_port" -j ACCEPT
+}
+
+apply_saved_rules() {
+  [[ -s $RULES_FILE ]] || return 0
+  ensure_runtime_chains
+  local protocol source_port destination_port extra
+  while read -r protocol source_port destination_port extra; do
+    [[ -z ${protocol:-} || $protocol == \#* ]] && continue
+    [[ -z ${extra:-} ]] || die "malformed rule in $RULES_FILE"
+    apply_rule "$protocol" "$source_port" "$destination_port"
+  done < "$RULES_FILE"
+}
+
+start_tunnel() {
+  require_root start
+  require_command ip
+  require_command iptables
+  require_command modprobe
+  require_command sysctl
+  load_config || die "not configured; run: sudo gre-manager configure"
+  modprobe ip_gre
+  ip tunnel del "$IFACE" 2>/dev/null || true
+  ip tunnel add "$IFACE" mode gre local "$LOCAL_IP" remote "$REMOTE_IP" ttl 255
+  ip address add "$GRE_LOCAL/$GRE_PREFIX" dev "$IFACE"
+  ip link set "$IFACE" mtu "$MTU" up
+  sysctl -q -w net.ipv4.ip_forward=1
+  remove_runtime_rules
+  apply_saved_rules
+  info "GRE tunnel started."
+}
+
+stop_tunnel() {
+  require_root stop
+  remove_runtime_rules
+  ip tunnel del "$IFACE" 2>/dev/null || true
+  info "GRE tunnel stopped."
+}
+
+configure() {
+  require_root configure
+  read -r -p "Local public IPv4: " LOCAL_IP
+  read -r -p "Remote public IPv4: " REMOTE_IP
+  read -r -p "Local tunnel IPv4 (without prefix): " GRE_LOCAL
+  read -r -p "Remote tunnel IPv4: " GRE_REMOTE
+  read -r -p "Tunnel prefix [30]: " GRE_PREFIX
+  GRE_PREFIX=${GRE_PREFIX:-30}
+  read -r -p "MTU [1400]: " MTU
+  MTU=${MTU:-1400}
+  save_config
+  start_tunnel
+  command -v systemctl >/dev/null 2>&1 && systemctl enable gre-manager.service >/dev/null 2>&1 || true
+}
+
+add_rule() {
+  require_root add-rule
+  load_config || die "not configured; run: sudo gre-manager configure"
+  local protocol=${1:-} source_port=${2:-} destination_port=${3:-}
+  [[ -n $protocol ]] || read -r -p "Protocol (tcp/udp): " protocol
+  [[ -n $source_port ]] || read -r -p "Public source port: " source_port
+  [[ -n $destination_port ]] || read -r -p "Remote destination port: " destination_port
+  valid_protocol "$protocol" || die "protocol must be tcp or udp"
+  valid_port "$source_port" || die "source port must be 1-65535"
+  valid_port "$destination_port" || die "destination port must be 1-65535"
+  install -d -m 700 "$CONFIG_DIR"
+  touch "$RULES_FILE"
+  chmod 600 "$RULES_FILE"
+  if awk -v p="$protocol" -v s="$source_port" \
+    '$1 == p && $2 == s { found=1 } END { exit !found }' "$RULES_FILE"; then
+    die "this protocol/public-port pair already has a rule"
+  fi
+  ensure_runtime_chains
+  apply_rule "$protocol" "$source_port" "$destination_port"
+  printf '%s %s %s\n' "$protocol" "$source_port" "$destination_port" >> "$RULES_FILE"
+  info "Port-forward rule added."
+}
+
+list_rules() {
+  require_root list-rules
+  if [[ ! -s $RULES_FILE ]]; then info "No saved rules."; return; fi
+  printf '%-8s %-12s %s\n' PROTOCOL PUBLIC_PORT REMOTE_PORT
+  awk '!/^($|#)/ { printf "%-8s %-12s %s\\n", $1, $2, $3 }' "$RULES_FILE"
+}
+
+clear_rules() {
+  require_root clear-rules
+  remove_runtime_rules
+  rm -f -- "$RULES_FILE"
+  info "All port-forward rules cleared."
+}
+
+status() {
+  load_config || die "not configured; run: sudo gre-manager configure"
+  if ip link show "$IFACE" >/dev/null 2>&1; then
+    ip -brief address show "$IFACE"
+    if ping -c 1 -W 2 "$GRE_REMOTE" >/dev/null 2>&1; then info "Remote endpoint: reachable"; else info "Remote endpoint: unreachable"; fi
+  else
+    info "GRE tunnel: stopped"
+    return 1
+  fi
+}
+
+menu() {
+  require_root menu
+  while true; do
+    printf '\n1) Configure/start  2) Add port forward  3) Status  4) List rules\n5) Clear rules      6) Restart           7) Stop    8) Exit\n'
+    read -r -p "Choice: " choice
+    case "$choice" in
+      1) configure ;; 2) add_rule ;; 3) status || true ;; 4) list_rules ;;
+      5) clear_rules ;; 6) stop_tunnel; start_tunnel ;; 7) stop_tunnel ;; 8) return ;;
+      *) info "Invalid choice." ;;
+    esac
+  done
+}
+
+usage() {
+  cat <<'EOF'
+GRE Manager - persistent GRE tunnel and port forwarding
+
+Usage: gre-manager COMMAND [ARGS]
+  configure                  Configure and start the tunnel
+  start|stop|restart         Control the tunnel
+  status                     Show tunnel state and reachability
+  add-rule [tcp|udp SRC DST] Add a persistent port-forward rule
+  list-rules                 List persistent rules
+  clear-rules                Remove all forwarding rules
+  menu                       Open the interactive menu
+  version                    Print version
+  help                       Show this help
+EOF
+}
+
+case "${1:-menu}" in
+  configure) configure ;; start) start_tunnel ;; stop) stop_tunnel ;;
+  restart) stop_tunnel; start_tunnel ;; status) status ;;
+  add-rule) shift; add_rule "$@" ;; list-rules) list_rules ;; clear-rules) clear_rules ;;
+  menu) menu ;; version|--version|-v) info "$VERSION" ;; help|--help|-h) usage ;;
+  *) usage >&2; exit 2 ;;
+esac
