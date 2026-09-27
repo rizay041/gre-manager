@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.1 - 2026-09-27
+
+- Add a true one-line installer that downloads, verifies, installs, and starts configuration.
+- Install required system packages automatically on Debian, Ubuntu, RHEL, and Fedora.
+- Rewrite the Persian guide with friendlier explanations and direct support contact.
+
 ## 2.1.0 - 2026-09-27
 
 - Validate every IP address, prefix, port, protocol, and MTU.
