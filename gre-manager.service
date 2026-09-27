@@ -1,0 +1,14 @@
+[Unit]
+Description=GRE Manager tunnel and port forwarding
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/etc/gre-manager/config.conf
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/gre-manager start
+ExecStop=/usr/local/bin/gre-manager stop
+
+[Install]
+WantedBy=multi-user.target
