@@ -14,10 +14,20 @@ for command_name in ip iptables modprobe sysctl awk ping; do
   command -v "$command_name" >/dev/null 2>&1 || missing+=("$command_name")
 done
 if ((${#missing[@]})); then
-  echo "Missing commands: ${missing[*]}" >&2
-  echo "Debian/Ubuntu: sudo apt install iproute2 iptables kmod procps iputils-ping" >&2
-  echo "RHEL/Fedora:   sudo dnf install iproute iptables kmod procps-ng iputils" >&2
-  exit 1
+  echo "Installing required system packages..."
+  if command -v apt-get >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y iproute2 iptables kmod procps iputils-ping
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y iproute iptables kmod procps-ng iputils
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y iproute iptables kmod procps-ng iputils
+  else
+    echo "Missing commands: ${missing[*]}" >&2
+    echo "Install iproute2, iptables, kmod, procps and ping, then retry." >&2
+    exit 1
+  fi
 fi
 
 install -d -m 700 /etc/gre-manager
