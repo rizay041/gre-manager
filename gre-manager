@@ -145,9 +145,21 @@ wizard() {
     read -r -p "Server role (IRAN/KHAREJ): " ROLE
     ROLE=${ROLE,,}
   fi
-  IRAN_IP=$(ui_input "RIZAY - IRAN endpoint" "Public IPv4 of the IRAN server:" "$IRAN_IP") || die "setup cancelled"
-  KHAREJ_IP=$(ui_input "RIZAY - KHAREJ endpoint" "Public IPv4 of the KHAREJ destination server:" "$KHAREJ_IP") || die "setup cancelled"
-  MTU=$(ui_input "RIZAY - MTU" "Tunnel MTU (1400 is recommended):" "${MTU:-1400}") || die "setup cancelled"
+  while true; do
+    IRAN_IP=$(ui_input "RIZAY - IRAN endpoint" "Public IPv4 of the IRAN server:" "$IRAN_IP") || die "setup cancelled"
+    valid_ipv4 "$IRAN_IP" && break
+    ui_message "RIZAY - Invalid IP" "Enter a valid public IPv4 for IRAN. Example: 203.0.113.10"
+  done
+  while true; do
+    KHAREJ_IP=$(ui_input "RIZAY - KHAREJ endpoint" "Public IPv4 of the KHAREJ destination server:" "$KHAREJ_IP") || die "setup cancelled"
+    if valid_ipv4 "$KHAREJ_IP" && [[ $KHAREJ_IP != "$IRAN_IP" ]]; then break; fi
+    ui_message "RIZAY - Invalid IP" "Enter a valid KHAREJ IPv4 different from the IRAN IP."
+  done
+  while true; do
+    MTU=$(ui_input "RIZAY - MTU" "Tunnel MTU (1400 is recommended):" "${MTU:-1400}") || die "setup cancelled"
+    valid_mtu "$MTU" && break
+    ui_message "RIZAY - Invalid MTU" "MTU must be a number between 576 and 9000."
+  done
   validate_config
 
   local role_text summary
@@ -350,7 +362,7 @@ health() {
   printf 'GRE path loss         : %s%%  (RTT min/avg/max: %s/%s/%s ms)\n' "$gre_loss" "$gre_min" "$gre_avg" "$gre_max"
   printf 'GRE interface         : %s\n' "$tunnel_text"
   printf 'IPv4 forwarding       : %s\n' "$forward_text"
-  printf '\nEstimated readiness   : %s%% — %s\n' "$score" "$label"
+  printf '\nEstimated readiness   : %s%% â€” %s\n' "$score" "$label"
   printf 'Note: this is a diagnostic score, not a guaranteed statistical probability.\n'
   printf 'Run this test on BOTH servers for a true two-sided comparison.\n'
   (( score >= 45 ))
@@ -425,3 +437,4 @@ case "${1:-menu}" in
   clear-rules) clear_rules ;; menu) menu ;; version|--version|-v) info "$VERSION" ;;
   help|--help|-h) usage ;; *) usage >&2; exit 2 ;;
 esac
+
