@@ -2,16 +2,29 @@
 set -Eeuo pipefail
 
 readonly RELEASE_BASE="https://github.com/rizay041/gre-manager/releases/latest/download"
-readonly INSTALLER_VERSION="3.0.0"
+readonly INSTALLER_VERSION="3.0.1"
 
+border='\033[38;5;27m'
+blue='\033[1;94m'
+accent='\033[1;96m'
+reset='\033[0m'
+printf '%b%s%b\n' "$border" '................................................................................' "$reset"
+printf '%b' "$blue"
 cat <<'EOF'
-......   .....  ......   ...   ..    ..
-..   ..    ..      ..   .. ..   ..  ..
-......     ..     ..    .......    ..
-..  ..     ..    ..     ..   ..    ..
-..   ..  .....  ......  ..   ..    ..
+.............  ...........  .............       ...       ...         ...
+...       ...      ...              ...        .....      ...         ...
+...       ...      ...             ...        ... ...      ...       ...
+.............      ...            ...        ...   ...      ...     ...
+...   ...          ...          ....        ...     ...      ...   ...
+...    ...         ...        ....         .............      .......
+...     ...        ...       ...           ...       ...        ...
+...      ...       ...      ...            ...       ...        ...
+...       ...  ...........  .............  ...       ...        ...
 EOF
-printf 'RIZAY Installer v%s\n\n' "$INSTALLER_VERSION"
+printf '%b' "$reset"
+printf '%b%47s%b\n' "$accent" 'RIZAY INSTALLER' "$reset"
+printf '%b%44s v%s%b\n' "$border" 'VERSION' "$INSTALLER_VERSION" "$reset"
+printf '%b%s%b\n\n' "$border" '................................................................................' "$reset"
 
 [[ ${EUID:-$(id -u)} -eq 0 ]] || { echo "Run this command with sudo." >&2; exit 1; }
 
