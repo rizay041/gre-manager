@@ -1,92 +1,122 @@
-# GRE Manager 🚀
+# RIZAY GRE Manager v3.0.0
 
-سلام رفیق! با این ابزار می‌تونی بین دو سرور Linux یک تونل GRE بسازی و پورت‌هات رو از یک سرور به اون یکی منتقل کنی؛ بدون اینکه درگیر دستورهای طولانی شبکه و iptables بشی.
+```text
+......   .....  ......   ...   ..    ..
+..   ..    ..      ..   .. ..   ..  ..
+......     ..     ..    .......    ..
+..  ..     ..    ..     ..   ..    ..
+..   ..  .....  ......  ..   ..    ..
+```
 
-## نصب با فقط یک خط
+Salam refigh! In abzar barat beyn server `IRAN` va server `KHAREJ` tunnel GRE misaze. User be IP server IRAN vasl mishe va port-ha az IRAN be service asli roye KHAREJ forward mishan.
 
-همین یک خط رو داخل ترمینال سرور کپی کن و Enter بزن:
+## Nasb ba faghat yek khat
+
+Hamin yek khat ro roye har do server bezan:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rizay041/gre-manager/main/quick-install.sh | sudo bash
 ```
 
-تمام! اسکریپت خودش آخرین نسخه رو دانلود می‌کنه، صحت فایل رو با SHA256 چک می‌کنه، پیش‌نیازها رو نصب می‌کنه و مستقیم می‌ره سراغ تنظیم تونل.
+Tamam! Script khodesh akharin release ro download mikone, SHA256 ro check mikone, dependency-ha ro nasb mikone va Wizard graphic ro baz mikone.
 
-## موقع نصب چی ازم می‌پرسه؟
+## Wizard chejori kar mikone?
 
-نگران اسم‌ها نباش؛ خیلی ساده‌ست:
+Aval role in server ro entekhab mikoni:
 
-| سؤال | چی باید وارد کنی؟ |
+- `IRAN`: server voroodi va mabda port-forward.
+- `KHAREJ`: server maghsad ke service asli roosh ejra mishe.
+
+Bad faghat in chizha ro mide:
+
+| Field | Chi vared konam? |
 |---|---|
-| `Local public IPv4` | IP عمومی همین سروری که الان داخلشی |
-| `Remote public IPv4` | IP عمومی سرور دوم |
-| `Local tunnel IPv4` | یک IP داخلی برای این سمت؛ مثلاً `10.10.10.1` |
-| `Remote tunnel IPv4` | IP داخلی سمت دوم؛ مثلاً `10.10.10.2` |
-| `Tunnel prefix` | معمولاً فقط Enter بزن تا `30` انتخاب بشه |
-| `MTU` | معمولاً فقط Enter بزن تا `1400` انتخاب بشه |
+| `IRAN public IPv4` | IP asli server IRAN |
+| `KHAREJ public IPv4` | IP asli server KHAREJ |
+| `MTU` | Mamoolan `1400` aliye |
 
-روی سرور دوم هم همون یک خط نصب رو اجرا کن، فقط جای Local و Remote رو برعکس بده. یعنی اگر سمت اول `10.10.10.1` بود، سمت دوم باید Local بشه `10.10.10.2`.
+GRE IP-ha khodkar set mishan:
 
-## انتقال پورت چطوریه؟
+- IRAN: `10.77.0.1/30`
+- KHAREJ: `10.77.0.2/30`
 
-مثلاً می‌خوای هرکس به پورت `443` این سرور وصل شد، بره به پورت `8443` سرور دوم:
+Pas dige IP local va remote ro eshtebah nemizani. Wizard ro roye har do server ejra kon; faghat role ro dorost entekhab kon.
+
+## Port Forward
+
+Port-forward faghat roye server `IRAN` sakhte mishe. Mesalan port `443` IRAN bere roye port `8443` KHAREJ:
 
 ```bash
 sudo gre-manager add-rule tcp 443 8443
 ```
 
-برای UDP هم فقط `tcp` رو با `udp` عوض کن.
+Baraye UDP faghat `tcp` ro be `udp` tabdil kon.
 
-اگر دوست داری همه‌چیز رو با منو انجام بدی:
+## Packet Loss va Tunnel Score
+
+In dastoor 50 packet roye masir Public va 50 packet dakhele GRE test mikone:
+
+```bash
+sudo gre-manager health
+```
+
+Natije in chizha ro neshon mide:
+
+- Public path packet loss
+- GRE path packet loss
+- Average RTT
+- UP/DOWN boodan interface
+- ON/OFF boodan IPv4 forwarding
+- Estimated readiness score az `0%` ta `100%`
+
+Score yek emtiaz tashkhisiye, na ehtemal amari ya guarantee. Momkene ICMP ro firewall block karde bashe vali service kar kone. Baraye natije vaghei, `health` ro roye har do server IRAN va KHAREJ ejra kon.
+
+Sample bishtar mikhay? Adad beyn 5 ta 200 bede:
+
+```bash
+sudo gre-manager health 100
+```
+
+## Dashboard Graphic
 
 ```bash
 sudo gre-manager menu
 ```
 
-## چند دستور کاربردی
+Az dakhele menu mitooni Setup, Health, Port Forward, Status, Restart va Clear Rules ro anjam bedi.
+
+## Dastoor-haye mofid
 
 ```bash
-sudo gre-manager status       # ببین تونل سالمه یا نه
-sudo gre-manager list-rules   # لیست پورت‌هایی که منتقل کردی
-sudo gre-manager restart      # راه‌اندازی دوباره تونل
-sudo gre-manager clear-rules  # پاک‌کردن همه قوانین انتقال پورت
+sudo gre-manager status
+sudo gre-manager list-rules
+sudo gre-manager restart
+sudo gre-manager clear-rules
 ```
 
-تنظیمات بعد از reboot هم سر جاش می‌مونه و سرویس خودش بالا میاد؛ لازم نیست دوباره کاری انجام بدی.
+Config va rule-ha bad az reboot ham mimoonan va systemd tunnel ro khodkar bala miavare.
 
-## اگر وصل نشد چی؟
+## Agar tunnel bala nayoomad
 
-اول این سه مورد رو چک کن:
-
-1. پروتکل GRE یا همون **IP Protocol 47** روی فایروال هر دو سرور باز باشه.
-2. IPهای Local و Remote رو جابه‌جا وارد نکرده باشی.
-3. اگر UFW یا firewalld داری، اجازهٔ عبور ترافیک Forward رو داده باشی.
-
-بعد وضعیت سرویس رو ببین:
+1. `IP Protocol 47` bayad beyn IP server IRAN va KHAREJ baz bashe.
+2. IP-ha ro dobare check kon.
+3. UFW, firewalld va policy chain `FORWARD` ro check kon.
+4. `sudo gre-manager health 100` ro roye har do server ejra kon.
+5. Log-ha ro ba dastoor-haye zir check kon.
 
 ```bash
 sudo systemctl status gre-manager
 sudo journalctl -u gre-manager -b
 ```
 
-## یک نکتهٔ امنیتی مهم
+## Security
 
-خود GRE رمزنگاری نداره. یعنی برای اطلاعات حساس بهتره تونل رو داخل IPsec یا WireGuard استفاده کنی و دسترسی Protocol 47 رو فقط برای IP سرور مقابل باز بذاری.
+GRE encryption nadare. Baraye data hassas, GRE ro dakhele IPsec ya WireGuard estefade kon va Protocol 47 ro faghat baraye IP server moghabel baz bezar.
 
-## حذف برنامه
+## Ertebat
 
-اگر فایل Release رو داری، این دستور برنامه رو پاک می‌کنه ولی تنظیماتت رو نگه می‌داره:
+Soal ya pishnahad dashti Issue baz kon ya Instagram message bede:
 
-```bash
-sudo ./uninstall.sh
-```
+[Instagram @rizay_041](https://www.instagram.com/rizay_041/)
 
-## ارتباط با من
-
-اگر سؤال، پیشنهاد یا مشکلی داشتی، توی GitHub یک Issue باز کن یا در اینستاگرام پیام بده:
-
-📷 Instagram: [@rizay_041](https://www.instagram.com/rizay_041/)
-
-ساخته‌شده با ❤️ برای اینکه راه‌اندازی GRE واقعاً راحت باشه.
-
-مجوز پروژه: [MIT](LICENSE)
+Made with care by RIZAY. License: [MIT](LICENSE)
