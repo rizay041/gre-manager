@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.0.1 - 2026-10-03
+
+- Redesign the RIZAY terminal logo as a large nine-row high-density dot matrix.
+- Add bright-blue ANSI branding, a dotted frame, and centered version text.
+- Apply a consistent blue theme to every Whiptail wizard and dashboard window.
+- Add a blue dotted RIZAY SVG logo for GitHub and release documentation.
+
 ## 3.0.0 - 2026-10-03
 
 - Add a graphical terminal wizard with a large dotted RIZAY banner.
