@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly VERSION="3.0.0"
+readonly VERSION="3.0.1"
 readonly CONFIG_DIR="/etc/gre-manager"
 readonly CONFIG_FILE="$CONFIG_DIR/config.conf"
 readonly RULES_FILE="$CONFIG_DIR/rules.conf"
@@ -24,23 +24,57 @@ PING_MIN="-"
 PING_AVG="-"
 PING_MAX="-"
 
+export NEWT_COLORS='
+root=white,blue
+border=brightblue,blue
+window=white,blue
+shadow=black,black
+title=brightcyan,blue
+button=blue,white
+actbutton=white,cyan
+compactbutton=white,blue
+checkbox=white,blue
+actcheckbox=white,cyan
+entry=white,blue
+label=white,blue
+listbox=white,blue
+actlistbox=white,cyan
+textbox=white,blue
+acttextbox=white,cyan
+helpline=brightcyan,blue
+roottext=white,blue
+'
+
 die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 info() { printf '%s\n' "$*"; }
 require_root() { [[ ${EUID:-$(id -u)} -eq 0 ]] || die "run with sudo: sudo gre-manager $*"; }
 require_command() { command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"; }
 
 banner() {
-  local cyan='' reset=''
-  if [[ -t 1 ]]; then cyan='\033[1;36m'; reset='\033[0m'; fi
-  printf '%b' "$cyan"
+  local border='' blue='' accent='' reset=''
+  if [[ -t 1 ]]; then
+    border='\033[38;5;27m'
+    blue='\033[1;94m'
+    accent='\033[1;96m'
+    reset='\033[0m'
+  fi
+  printf '%b%s%b\n' "$border" '................................................................................' "$reset"
+  printf '%b' "$blue"
   cat <<'EOF'
-......   .....  ......   ...   ..    ..
-..   ..    ..      ..   .. ..   ..  ..
-......     ..     ..    .......    ..
-..  ..     ..    ..     ..   ..    ..
-..   ..  .....  ......  ..   ..    ..
+.............  ...........  .............       ...       ...         ...
+...       ...      ...              ...        .....      ...         ...
+...       ...      ...             ...        ... ...      ...       ...
+.............      ...            ...        ...   ...      ...     ...
+...   ...          ...          ....        ...     ...      ...   ...
+...    ...         ...        ....         .............      .......
+...     ...        ...       ...           ...       ...        ...
+...      ...       ...      ...            ...       ...        ...
+...       ...  ...........  .............  ...       ...        ...
 EOF
-  printf '%bGRE Manager v%s%b\n\n' "$reset" "$VERSION" "$reset"
+  printf '%b' "$reset"
+  printf '%b%48s%b\n' "$accent" 'RIZAY GRE MANAGER' "$reset"
+  printf '%b%44s v%s%b\n' "$border" 'VERSION' "$VERSION" "$reset"
+  printf '%b%s%b\n\n' "$border" '................................................................................' "$reset"
 }
 
 valid_ipv4() {
