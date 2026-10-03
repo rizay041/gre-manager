@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.0.0 - 2026-10-03
+
+- Add a graphical terminal wizard with a large dotted RIZAY banner.
+- Add explicit IRAN gateway and KHAREJ destination roles.
+- Restrict port-forward creation to the IRAN gateway.
+- Add 50-sample Public/GRE packet-loss, RTT, and readiness diagnostics.
+- Add a graphical management dashboard and port-forward forms.
+- Install Whiptail automatically while keeping a plain-terminal fallback.
+- Use Latin-only IRAN/KHAREJ labels across the app and documentation.
+
 ## 2.1.1 - 2026-09-27
 
 - Add a true one-line installer that downloads, verifies, installs, and starts configuration.
