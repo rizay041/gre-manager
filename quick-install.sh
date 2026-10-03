@@ -2,11 +2,21 @@
 set -Eeuo pipefail
 
 readonly RELEASE_BASE="https://github.com/rizay041/gre-manager/releases/latest/download"
+readonly INSTALLER_VERSION="3.0.0"
 
-[[ ${EUID:-$(id -u)} -eq 0 ]] || { echo "این دستور باید با sudo اجرا شود." >&2; exit 1; }
+cat <<'EOF'
+......   .....  ......   ...   ..    ..
+..   ..    ..      ..   .. ..   ..  ..
+......     ..     ..    .......    ..
+..  ..     ..    ..     ..   ..    ..
+..   ..  .....  ......  ..   ..    ..
+EOF
+printf 'RIZAY Installer v%s\n\n' "$INSTALLER_VERSION"
+
+[[ ${EUID:-$(id -u)} -eq 0 ]] || { echo "Run this command with sudo." >&2; exit 1; }
 
 for command_name in curl tar sha256sum mktemp; do
-  command -v "$command_name" >/dev/null 2>&1 || { echo "ابزار لازم پیدا نشد: $command_name" >&2; exit 1; }
+  command -v "$command_name" >/dev/null 2>&1 || { echo "Required tool not found: $command_name" >&2; exit 1; }
 done
 
 work_dir=$(mktemp -d /tmp/gre-manager-install.XXXXXX)
@@ -14,7 +24,7 @@ cleanup() { rm -rf -- "$work_dir"; }
 trap cleanup EXIT
 
 cd "$work_dir"
-echo "در حال دانلود آخرین نسخه GRE Manager..."
+echo "RIZAY: downloading the latest GRE Manager release..."
 curl -fL "$RELEASE_BASE/gre-manager-linux.tar.gz" -o gre-manager-linux.tar.gz
 curl -fL "$RELEASE_BASE/gre-manager-linux.tar.gz.sha256" -o gre-manager-linux.tar.gz.sha256
 sha256sum -c gre-manager-linux.tar.gz.sha256
@@ -23,9 +33,9 @@ cd gre-manager-linux
 ./install.sh
 
 echo
-echo "نصب تمام شد؛ حالا چند سؤال کوتاه برای ساخت تونل می‌پرسم."
+echo "Install completed. Starting the IRAN/KHAREJ graphical wizard..."
 if [[ -r /dev/tty ]]; then
-  /usr/local/bin/gre-manager configure </dev/tty
+  /usr/local/bin/gre-manager wizard </dev/tty
 else
-  echo "برای تنظیم تونل اجرا کنید: sudo gre-manager configure"
+  echo "Start setup with: sudo gre-manager wizard"
 fi
