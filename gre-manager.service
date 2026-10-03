@@ -1,5 +1,5 @@
 [Unit]
-Description=GRE Manager tunnel and port forwarding
+Description=RIZAY GRE Manager - IRAN to KHAREJ tunnel
 Wants=network-online.target
 After=network-online.target
 ConditionPathExists=/etc/gre-manager/config.conf
