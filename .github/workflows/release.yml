@@ -19,8 +19,10 @@ jobs:
       - name: Build release archive
         run: |
           install -d dist/gre-manager-linux
+          install -d dist/gre-manager-linux/assets
           install -m 755 gre-manager install.sh quick-install.sh uninstall.sh dist/gre-manager-linux/
           install -m 644 gre-manager.service README.md CHANGELOG.md LICENSE VERSION dist/gre-manager-linux/
+          install -m 644 assets/rizay-logo.svg dist/gre-manager-linux/assets/
           tar -C dist -czf dist/gre-manager-linux.tar.gz gre-manager-linux
           cd dist && sha256sum gre-manager-linux.tar.gz > gre-manager-linux.tar.gz.sha256
       - name: Publish GitHub Release
