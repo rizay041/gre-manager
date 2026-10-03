@@ -362,7 +362,7 @@ health() {
   printf 'GRE path loss         : %s%%  (RTT min/avg/max: %s/%s/%s ms)\n' "$gre_loss" "$gre_min" "$gre_avg" "$gre_max"
   printf 'GRE interface         : %s\n' "$tunnel_text"
   printf 'IPv4 forwarding       : %s\n' "$forward_text"
-  printf '\nEstimated readiness   : %s%% â€” %s\n' "$score" "$label"
+  printf '\nEstimated readiness   : %s%% — %s\n' "$score" "$label"
   printf 'Note: this is a diagnostic score, not a guaranteed statistical probability.\n'
   printf 'Run this test on BOTH servers for a true two-sided comparison.\n'
   (( score >= 45 ))
@@ -437,4 +437,3 @@ case "${1:-menu}" in
   clear-rules) clear_rules ;; menu) menu ;; version|--version|-v) info "$VERSION" ;;
   help|--help|-h) usage ;; *) usage >&2; exit 2 ;;
 esac
-
