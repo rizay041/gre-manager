@@ -106,16 +106,16 @@ valid_ipv4() {
   [[ $ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
   read -r -a octets <<< "$ip"
   for i in "${octets[@]}"; do
-    [[ $i =~ ^[0-9]{1,3}$ && 10#$i -le 255 ]] || return 1
+    [[ $i =~ ^[0-9]{1,3}$ ]] && (( 10#$i <= 255 )) || return 1
   done
 }
 
-valid_port() { [[ $1 =~ ^[0-9]+$ && 10#$1 -ge 1 && 10#$1 -le 65535 ]]; }
-valid_mtu() { [[ $1 =~ ^[0-9]+$ && 10#$1 -ge 576 && 10#$1 -le 9000 ]]; }
+valid_port() { [[ $1 =~ ^[0-9]+$ ]] && (( 10#$1 >= 1 && 10#$1 <= 65535 )); }
+valid_mtu() { [[ $1 =~ ^[0-9]+$ ]] && (( 10#$1 >= 576 && 10#$1 <= 9000 )); }
 valid_protocol() { [[ $1 == tcp || $1 == udp ]]; }
 valid_mode() { [[ $1 == hybrid || $1 == gre || $1 == gost ]]; }
 valid_transport() { [[ $1 == public || $1 == gre ]]; }
-valid_samples() { [[ $1 =~ ^[0-9]+$ && 10#$1 -ge 5 && 10#$1 -le 200 ]]; }
+valid_samples() { [[ $1 =~ ^[0-9]+$ ]] && (( 10#$1 >= 5 && 10#$1 <= 200 )); }
 
 derive_endpoints() {
   case "$ROLE" in
@@ -824,6 +824,8 @@ health() {
     require_command timeout
     probe_target=$GRE_REMOTE
     [[ $MODE != gost ]] || probe_target=$REMOTE_IP
+    # The variables below are positional parameters inside the child Bash process.
+    # shellcheck disable=SC2016
     if timeout 3 bash -c 'exec 3<>/dev/tcp/$1/$2' _ "$probe_target" "$service_port" 2>/dev/null; then
       tcp_text="OPEN ($probe_target:$service_port)"
     else
@@ -1038,7 +1040,11 @@ menu() {
     else
       printf '1) Setup  2) Status  3) Health  4) Add GRE  5) Add GOST\n6) Doctor 7) Restart 8) About   9) Exit\n'
       read -r -p "Choice: " choice
-      case "$choice" in 1) choice=quick;; 2) choice=status;; 3) choice=health-cli;; 4) choice=add-gre;; 5) choice=add-gost;; 6) choice=doctor-cli;; 7) choice=restart-cli;; 8) choice=about;; 9) choice=exit;; esac
+      case "$choice" in
+        1) choice='quick' ;; 2) choice='status' ;; 3) choice='health-cli' ;;
+        4) choice='add-gre' ;; 5) choice='add-gost' ;; 6) choice='doctor-cli' ;;
+        7) choice='restart-cli' ;; 8) choice='about' ;; 9) choice='exit' ;;
+      esac
     fi
     case "$choice" in
       quick) wizard; return 0 ;; tunnels) tunnel_menu ;; ports) port_menu ;; health) health_menu ;;

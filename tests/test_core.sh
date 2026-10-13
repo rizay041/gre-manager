@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=../gre-manager
+# shellcheck disable=SC1091
 source "$ROOT_DIR/gre-manager"
 
 tests=0
@@ -44,18 +45,18 @@ check "accept public GOST path" valid_transport "public"
 check "accept GRE GOST path" valid_transport "gre"
 check "reject unsafe GOST path" is_not_valid_transport 'public;id'
 
-ROLE="iran"
-MODE="hybrid"
-IRAN_IP="203.0.113.10"
-KHAREJ_IP="198.51.100.20"
-MTU="1400"
+export ROLE="iran"
+export MODE="hybrid"
+export IRAN_IP="203.0.113.10"
+export KHAREJ_IP="198.51.100.20"
+export MTU="1400"
 validate_config
 check "IRAN local endpoint" is_equal "$LOCAL_IP" "$IRAN_IP"
 check "IRAN remote endpoint" is_equal "$REMOTE_IP" "$KHAREJ_IP"
 check "IRAN GRE address" is_equal "$GRE_LOCAL" "10.77.0.1"
 check "IRAN GRE peer" is_equal "$GRE_REMOTE" "10.77.0.2"
 
-ROLE="kharej"
+export ROLE="kharej"
 validate_config
 check "KHAREJ local endpoint" is_equal "$LOCAL_IP" "$KHAREJ_IP"
 check "KHAREJ remote endpoint" is_equal "$REMOTE_IP" "$IRAN_IP"
