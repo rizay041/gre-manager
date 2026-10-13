@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 readonly RELEASE_BASE="https://github.com/rizay041/gre-manager/releases/latest/download"
-readonly INSTALLER_VERSION="3.0.1"
+readonly INSTALLER_VERSION="5.0.0"
 
 border='\033[38;5;27m'
 blue='\033[1;94m'
@@ -37,7 +37,7 @@ cleanup() { rm -rf -- "$work_dir"; }
 trap cleanup EXIT
 
 cd "$work_dir"
-echo "RIZAY: downloading the latest GRE Manager release..."
+echo "RIZAY: downloading the latest GRE + GOST Manager release..."
 curl -fL "$RELEASE_BASE/gre-manager-linux.tar.gz" -o gre-manager-linux.tar.gz
 curl -fL "$RELEASE_BASE/gre-manager-linux.tar.gz.sha256" -o gre-manager-linux.tar.gz.sha256
 sha256sum -c gre-manager-linux.tar.gz.sha256

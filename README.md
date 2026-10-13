@@ -1,10 +1,10 @@
-![RIZAY GRE Manager](assets/rizay-logo.svg)
+![RIZAY Tunnel Manager](assets/rizay-logo.svg)
 
-# RIZAY GRE Manager v3.0.1
+# RIZAY Tunnel Manager v5.0.0
+
+پنل حرفه‌ای و سبک برای ساخت تونل بین سرورهای `IRAN` و `KHAREJ` با دو موتور `GRE` و `GOST`.
 
 ## راهنمای فارسی
-
-سلام رفیق! این ابزار بین سرور `IRAN` و `KHAREJ` تونل GRE می‌سازد. کاربران به IP سرور ایران وصل می‌شوند و پورت‌ها به سرویس اصلی روی سرور خارج منتقل می‌شوند.
 
 ### نصب با فقط یک خط
 
@@ -14,117 +14,150 @@
 curl -fsSL https://raw.githubusercontent.com/rizay041/gre-manager/main/quick-install.sh | sudo bash
 ```
 
-تمام! نصب‌کننده خودش آخرین Release را دانلود می‌کند، SHA256 را بررسی می‌کند، پیش‌نیازها را نصب می‌کند و Wizard آبی و گرافیکی `RIZAY` را باز می‌کند.
+نصاب آخرین Release را دانلود می‌کند، امضای `SHA256` آن را بررسی می‌کند، پیش‌نیازها را نصب می‌کند و پنل آبی `RIZAY` را باز می‌کند.
 
-### داخل Wizard چه چیزی انتخاب کنم؟
+### داخل نصب‌کننده چه انتخاب کنم؟
 
-- روی سرور ایران، نقش `IRAN` را انتخاب کن.
-- روی سرور مقصد، نقش `KHAREJ` را انتخاب کن.
-- در هر دو سرور، IP عمومی ایران و خارج را وارد کن.
-- برای MTU معمولاً مقدار `1400` مناسب است.
+روی هر دو سرور حالت پیشنهادی `HYBRID` را انتخاب کن:
 
-آدرس‌های داخلی GRE خودکار تنظیم می‌شوند:
+- سروری که کاربر به آن وصل می‌شود: `IRAN`
+- سروری که سرویس اصلی روی آن است: `KHAREJ`
+- در هر دو سرور، Public IPv4 هر دو سمت را یکسان وارد کن.
+- مقدار پیشنهادی `MTU` برابر `1400` است.
+
+GRE به‌صورت خودکار این IPها را می‌سازد:
 
 - `IRAN`: `10.77.0.1/30`
 - `KHAREJ`: `10.77.0.2/30`
 
-### انتقال پورت
+در حالت `HYBRID`، GRE روی هر دو سرور اجرا می‌شود. سرویس GOST فقط روی `IRAN` لازم است و ترافیک پورت انتخابی را به `KHAREJ` می‌فرستد.
 
-قانون Port Forward فقط روی سرور `IRAN` ساخته می‌شود. مثال زیر پورت `443` ایران را به پورت `8443` خارج منتقل می‌کند:
+### پنل گرافیکی
+
+هر وقت خواستی پنل را دوباره باز کنی:
+
+```bash
+sudo gre-manager
+```
+
+بخش‌های پنل:
+
+- `Tunnel Center`: نصب و کنترل GRE و GOST
+- `Port Manager`: اضافه، حذف و نمایش پورت‌ها
+- `Health Center`: Packet Loss، RTT، Jitter، سرویس‌تست و Doctor
+- `Live Dashboard`: وضعیت زنده هر دو موتور
+- `Maintenance`: تعمیر خودکار و بهینه‌سازی امن شبکه
+
+### انتقال پورت با GOST
+
+ساده‌ترین حالت، انتقال مستقیم پورت `443` سرور `IRAN` به پورت `8443` سرور `KHAREJ` است:
+
+```bash
+sudo gre-manager add-gost tcp 443 8443 public
+```
+
+اگر می‌خواهی GOST ترافیک را داخل GRE عبور دهد:
+
+```bash
+sudo gre-manager add-gost tcp 443 8443 gre
+```
+
+برای UDP، به‌جای `tcp` بنویس `udp`. باینری رسمی GOST v3.3.0 با اولین Rule دانلود می‌شود و checksum رسمی آن قبل از نصب بررسی خواهد شد. این باینری جدا از GOST احتمالی خود سیستم نگهداری می‌شود.
+
+### انتقال پورت با GRE و iptables
+
+این دستور را فقط روی سرور `IRAN` اجرا کن:
 
 ```bash
 sudo gre-manager add-rule tcp 443 8443
 ```
 
-برای UDP فقط `tcp` را با `udp` عوض کن.
-
-### بررسی Packet Loss و کیفیت تونل
+### تست واقعی کیفیت مسیر
 
 ```bash
 sudo gre-manager health
-```
-
-این ابزار به‌صورت پیش‌فرض ۵۰ پکت روی مسیر Public و ۵۰ پکت داخل GRE می‌فرستد و موارد زیر را نمایش می‌دهد:
-
-- درصد Packet Loss مسیر Public و GRE
-- حداقل، میانگین و حداکثر RTT
-- وضعیت GRE Interface و IPv4 Forwarding
-- امتیاز تخمینی آمادگی تونل از ۰ تا ۱۰۰
-
-برای بررسی دقیق‌تر می‌توانی تعداد نمونه را تا ۲۰۰ افزایش بدهی:
-
-```bash
 sudo gre-manager health 100
+sudo gre-manager health 100 443
 ```
 
-این درصد یک امتیاز تشخیصی است، نه احتمال آماری تضمین‌شده. ممکن است ICMP در فایروال بسته باشد ولی سرویس کار کند. برای نتیجه بهتر، دستور Health را روی هر دو سرور اجرا کن.
+گزارش شامل Packet Loss مسیر Public و GRE، کمینه/میانگین/بیشینه RTT، Jitter، وضعیت هر دو موتور و امتیاز آمادگی است. این امتیاز تشخیصی است و تضمین آماری محسوب نمی‌شود. تست را روی هر دو سرور اجرا کن.
 
-### داشبورد گرافیکی
+### Doctor، Repair و بهینه‌سازی
 
 ```bash
-sudo gre-manager menu
+sudo gre-manager doctor
+sudo gre-manager repair
+sudo gre-manager optimize
+sudo gre-manager status --json
 ```
 
-از داخل داشبورد می‌توانی Setup، Health، Port Forward، Status، Restart و پاک‌کردن Rules را انجام بدهی.
+`optimize` فقط تنظیمات مشخص و قابل‌بازگشت شامل FQ، TCP MTU probing و در صورت پشتیبانی کرنل BBR را اعمال می‌کند. برای حذف پروفایل:
 
-### نکته امنیتی
+```bash
+sudo gre-manager restore-network
+```
 
-GRE رمزنگاری ندارد. برای اطلاعات حساس آن را داخل IPsec یا WireGuard استفاده کن و دسترسی IP Protocol 47 را فقط برای IP سرور مقابل باز بگذار.
+### دستورهای کاربردی
+
+```bash
+sudo gre-manager status
+sudo gre-manager list-rules
+sudo gre-manager list-gost
+sudo gre-manager remove-gost tcp 443
+sudo gre-manager gost-logs
+sudo gre-manager restart
+```
+
+### نکته امنیتی مهم
+
+GRE رمزنگاری ندارد. انتقال ساده GOST در حالت `public` هم به‌خودی‌خود رمزنگاری‌شده نیست. برای داده حساس از WireGuard یا IPsec استفاده کن و در Firewall فقط پورت‌ها و IPهای لازم را باز بگذار.
 
 ---
 
 ## English Guide
 
-RIZAY creates a persistent GRE tunnel from an `IRAN` gateway to a `KHAREJ` destination server, with managed port forwarding and network diagnostics.
+RIZAY is a bilingual terminal panel for managing a `GRE`, `GOST`, or recommended `HYBRID` stack between an `IRAN` gateway and a `KHAREJ` destination.
 
 ### One-line installation
 
-Run this command on both servers:
+Run on both servers:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rizay041/gre-manager/main/quick-install.sh | sudo bash
 ```
 
-The installer downloads the latest verified release, checks its SHA256 checksum, installs dependencies, and opens the blue graphical terminal wizard.
+Choose `HYBRID`, select the local server role, enter both public IPv4 addresses, and keep MTU `1400` unless your network requires a lower value.
 
-### Setup
+### GOST forwarding on IRAN
 
-- Select `IRAN` on the gateway server.
-- Select `KHAREJ` on the destination server.
-- Enter both public IPv4 addresses on each server.
-- Keep the recommended MTU of `1400` unless your network needs a lower value.
+```bash
+sudo gre-manager add-gost tcp 443 8443 public
+sudo gre-manager add-gost udp 443 8443 public
+sudo gre-manager add-gost tcp 8443 8443 gre
+```
 
-GRE addresses are assigned automatically: `10.77.0.1/30` for IRAN and `10.77.0.2/30` for KHAREJ.
+`public` sends directly to the KHAREJ public IP and stays independent of GRE. `gre` targets the private GRE peer. The official pinned GOST binary is checksum-verified and installed in an isolated RIZAY path.
 
-### Forward a port
-
-Run port-forward commands on the IRAN server only:
+### GRE forwarding on IRAN
 
 ```bash
 sudo gre-manager add-rule tcp 443 8443
 ```
 
-### Network diagnostics
+### Diagnostics and maintenance
 
 ```bash
-sudo gre-manager health
-sudo gre-manager health 100
+sudo gre-manager health 100 443
+sudo gre-manager doctor
+sudo gre-manager repair
+sudo gre-manager status --json
+sudo gre-manager optimize
 ```
 
-Health reports Public/GRE packet loss, min/average/max RTT, interface state, forwarding state, and an estimated readiness score. Run it on both servers for a two-sided comparison. The score is diagnostic, not a guaranteed statistical probability.
-
-### Useful commands
-
-```bash
-sudo gre-manager menu
-sudo gre-manager status
-sudo gre-manager list-rules
-sudo gre-manager restart
-sudo gre-manager clear-rules
-```
+GRE and plain GOST port forwarding do not provide encryption. Use WireGuard or IPsec when confidentiality is required.
 
 ## ارتباط / Contact
 
-[Instagram @rizay_041](https://www.instagram.com/rizay_041/)
+[Instagram @rizay_041](https://www.instagram.com/rizay_041/) · [GitHub @rizay041](https://github.com/rizay041)
 
 Made with care by RIZAY. License: [MIT](LICENSE)

@@ -15,13 +15,15 @@ jobs:
       - name: Verify tag and version
         run: test "${GITHUB_REF_NAME#v}" = "$(cat VERSION)"
       - name: Validate scripts
-        run: bash -n gre-manager install.sh quick-install.sh uninstall.sh
+        run: |
+          bash -n gre-manager install.sh quick-install.sh uninstall.sh tests/test_core.sh
+          bash tests/test_core.sh
       - name: Build release archive
         run: |
           install -d dist/gre-manager-linux
           install -d dist/gre-manager-linux/assets
           install -m 755 gre-manager install.sh quick-install.sh uninstall.sh dist/gre-manager-linux/
-          install -m 644 gre-manager.service README.md CHANGELOG.md LICENSE VERSION dist/gre-manager-linux/
+          install -m 644 gre-manager.service rizay-gost.service README.md CHANGELOG.md LICENSE VERSION dist/gre-manager-linux/
           install -m 644 assets/rizay-logo.svg dist/gre-manager-linux/assets/
           tar -C dist -czf dist/gre-manager-linux.tar.gz gre-manager-linux
           cd dist && sha256sum gre-manager-linux.tar.gz > gre-manager-linux.tar.gz.sha256
@@ -33,5 +35,5 @@ jobs:
             dist/gre-manager-linux.tar.gz \
             dist/gre-manager-linux.tar.gz.sha256 \
             --verify-tag \
-            --title "RIZAY GRE Manager $GITHUB_REF_NAME" \
+            --title "RIZAY Tunnel Manager $GITHUB_REF_NAME" \
             --notes-file CHANGELOG.md

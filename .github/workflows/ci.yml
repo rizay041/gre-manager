@@ -15,11 +15,14 @@ jobs:
       - name: Syntax check
         run: |
           bash -n gre-manager install.sh quick-install.sh uninstall.sh
+          bash -n tests/test_core.sh
           test "$(bash gre-manager version)" = "$(cat VERSION)"
           bash gre-manager help >/dev/null
           ! LC_ALL=C.UTF-8 grep -Pn '[\x{0600}-\x{06FF}]' gre-manager install.sh quick-install.sh
           grep -q 'IRAN' gre-manager
           grep -q 'KHAREJ' gre-manager
+      - name: Core behavior tests
+        run: bash tests/test_core.sh
       - name: ShellCheck
         uses: ludeeus/action-shellcheck@2.0.0
         with:

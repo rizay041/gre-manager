@@ -1,5 +1,29 @@
 # Changelog
 
+## 5.0.0 - 2026-10-13
+
+- Add HYBRID mode with GRE and verified official GOST 3.3.0 forwarding.
+- Add separate persistent GOST rules over the public path or inside GRE.
+- Add SHA256-verified multi-architecture GOST installation without overwriting a system GOST binary.
+- Replace the flat menu with Tunnel, Port, Health, and Maintenance centers.
+- Add GOST service status, logs, rule removal, rebuild, and Doctor checks.
+- Add an opt-in safe network profile with FQ, MTU probing, and feature-detected BBR.
+- Add a hardened standalone systemd service for the GOST engine.
+- Preserve the one-line installer and bilingual usage guide.
+
+## 4.0.0 - 2026-10-13
+
+- Add Doctor preflight checks for commands, kernel GRE, routes, permissions, service, firewall, and saved rules.
+- Add safe single-rule removal with an automatic firewall rebuild.
+- Add live iptables packet and byte counters.
+- Add a Repair workflow that rebuilds the tunnel and rules before diagnostics.
+- Add JSON status output for monitoring and automation.
+- Add optional TCP service probing plus jitter to network Health reports.
+- Serialize network mutations with a process lock and wait for the xtables lock.
+- Make rule-file updates atomic and remove every stale duplicate firewall jump.
+- Back up the previous installed binary during upgrades.
+- Harden the systemd service and add automated core behavior tests.
+
 ## 3.0.1 - 2026-10-03
 
 - Redesign the RIZAY terminal logo as a large nine-row high-density dot matrix.

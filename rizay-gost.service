@@ -1,0 +1,24 @@
+[Unit]
+Description=RIZAY Tunnel Manager - GOST forwarding engine
+Wants=network-online.target
+After=network-online.target gre-manager.service
+ConditionPathExists=/etc/gre-manager/gost.yaml
+
+[Service]
+Type=simple
+Environment=GOST_LOGGER_LEVEL=warn
+ExecStart=/usr/local/lib/gre-manager/gost -C /etc/gre-manager/gost.yaml
+Restart=on-failure
+RestartSec=3s
+TimeoutStartSec=30s
+TimeoutStopSec=20s
+UMask=0077
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+NoNewPrivileges=true
+LockPersonality=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target
