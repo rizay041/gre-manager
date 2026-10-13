@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly VERSION="5.0.0"
+readonly VERSION="5.0.1"
 readonly CONFIG_DIR="/etc/gre-manager"
 readonly CONFIG_FILE="$CONFIG_DIR/config.conf"
 readonly RULES_FILE="$CONFIG_DIR/rules.conf"
@@ -96,7 +96,7 @@ banner() {
 ...       ...  ...........  .............  ...       ...        ...
 EOF
   printf '%b' "$reset"
-  printf '%b%48s%b\n' "$accent" 'RIZAY GRE MANAGER' "$reset"
+  printf '%b%48s%b\n' "$accent" 'RIZAY TUNNEL MANAGER' "$reset"
   printf '%b%44s v%s%b\n' "$border" 'VERSION' "$VERSION" "$reset"
   printf '%b%s%b\n\n' "$border" '................................................................................' "$reset"
 }

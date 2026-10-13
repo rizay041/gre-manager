@@ -1,6 +1,6 @@
 ![RIZAY Tunnel Manager](assets/rizay-logo.svg)
 
-# RIZAY Tunnel Manager v5.0.0
+# RIZAY Tunnel Manager v5.0.1
 
 پنل حرفه‌ای و سبک برای ساخت تونل بین سرورهای `IRAN` و `KHAREJ` با دو موتور `GRE` و `GOST`.
 

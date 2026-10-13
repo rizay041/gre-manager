@@ -1,5 +1,9 @@
 # Changelog
 
+## 5.0.1 - 2026-10-13
+
+- Align the terminal and SVG branding with the new RIZAY Tunnel Manager name.
+
 ## 5.0.0 - 2026-10-13
 
 - Add HYBRID mode with GRE and verified official GOST 3.3.0 forwarding.

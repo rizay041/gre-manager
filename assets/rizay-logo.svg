@@ -24,12 +24,12 @@
   <ellipse cx="600" cy="175" rx="500" ry="210" fill="url(#glow)"/>
   <rect x="18" y="18" width="1164" height="384" rx="25" fill="none" stroke="#1d4ed8" stroke-width="3" stroke-dasharray="2 13"/>
   <text x="600" y="205" text-anchor="middle" font-family="DejaVu Sans Mono,monospace" font-size="170" font-weight="900" letter-spacing="14" fill="url(#dots)" stroke="#60a5fa" stroke-width="1" filter="url(#softGlow)">RIZAY</text>
-  <text x="600" y="258" text-anchor="middle" font-family="Arial,sans-serif" font-size="25" font-weight="700" letter-spacing="12" fill="#7dd3fc">GRE MANAGER</text>
+  <text x="600" y="258" text-anchor="middle" font-family="Arial,sans-serif" font-size="25" font-weight="700" letter-spacing="10" fill="#7dd3fc">TUNNEL MANAGER</text>
   <path d="M300 330 H530 M670 330 H900" stroke="#38bdf8" stroke-width="5" stroke-linecap="round" stroke-dasharray="1 16"/>
   <circle cx="250" cy="330" r="44" fill="#082f49" stroke="#38bdf8" stroke-width="3"/>
   <circle cx="950" cy="330" r="44" fill="#082f49" stroke="#38bdf8" stroke-width="3"/>
   <rect x="530" y="302" width="140" height="56" rx="28" fill="#1d4ed8" stroke="#7dd3fc" stroke-width="2"/>
   <text x="250" y="337" text-anchor="middle" font-family="Arial,sans-serif" font-size="19" font-weight="700" fill="#e0f2fe">IRAN</text>
-  <text x="600" y="338" text-anchor="middle" font-family="Arial,sans-serif" font-size="20" font-weight="800" fill="white">v5.0.0</text>
+  <text x="600" y="338" text-anchor="middle" font-family="Arial,sans-serif" font-size="20" font-weight="800" fill="white">v5.0.1</text>
   <text x="950" y="337" text-anchor="middle" font-family="Arial,sans-serif" font-size="19" font-weight="700" fill="#e0f2fe">KHAREJ</text>
 </svg>

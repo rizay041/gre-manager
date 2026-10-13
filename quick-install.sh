@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 readonly RELEASE_BASE="https://github.com/rizay041/gre-manager/releases/latest/download"
-readonly INSTALLER_VERSION="5.0.0"
+readonly INSTALLER_VERSION="5.0.1"
 
 border='\033[38;5;27m'
 blue='\033[1;94m'
