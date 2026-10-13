@@ -26,6 +26,10 @@ is_not_valid_ipv4() { ! valid_ipv4 "$1"; }
 is_not_valid_port() { ! valid_port "$1"; }
 is_not_valid_mode() { ! valid_mode "$1"; }
 is_not_valid_transport() { ! valid_transport "$1"; }
+is_not_valid_port_list() { ! parse_port_list "$1"; }
+has_port_list() { parse_port_list "$1" && [[ $PORT_LIST == "$2" ]]; }
+has_batch_size() { prepare_port_batch "$1" "$2" "$3" && [[ ${#BATCH_SOURCES[@]} == "$4" && ${#BATCH_PROTOCOLS[@]} == "$5" ]]; }
+has_no_valid_batch() { ! prepare_port_batch "$1" "$2" "$3"; }
 
 check "accept normal IPv4" valid_ipv4 "203.0.113.10"
 check "accept IPv4 boundaries" valid_ipv4 "0.0.0.0"
@@ -35,6 +39,25 @@ check "accept first TCP port" valid_port "1"
 check "accept last TCP port" valid_port "65535"
 check "reject zero port" is_not_valid_port "0"
 check "reject port overflow" is_not_valid_port "65536"
+check "reject arithmetic overflow" is_not_valid_port "18446744073709551617"
+check "normalize comma-separated ports" has_port_list "443,8443,2053" "443,8443,2053"
+check "accept spaces around commas" has_port_list " 443 , 8443 ,2053 " "443,8443,2053"
+check "normalize leading zero ports" has_port_list "00443,080" "443,80"
+check "reject empty list" is_not_valid_port_list ""
+check "reject empty item" is_not_valid_port_list "443,,8443"
+check "reject trailing comma" is_not_valid_port_list "443,8443,"
+check "reject leading comma" is_not_valid_port_list ",443"
+check "reject duplicate ports" is_not_valid_port_list "443,443"
+check "reject equivalent duplicate ports" is_not_valid_port_list "443,00443"
+check "reject missing commas" is_not_valid_port_list "443 8443"
+check "reject zero in a list" is_not_valid_port_list "443,0"
+check "reject overflow in a list" is_not_valid_port_list "443,65536"
+# The literal shell expression must be rejected, never evaluated.
+# shellcheck disable=SC2016
+check "reject shell expressions in ports" is_not_valid_port_list '443,$(id)'
+check "prepare TCP and UDP for three ports" has_batch_size both "443,8443,2053" "443,8443,2053" 3 2
+check "prepare ordered port mapping" has_batch_size tcp "443,2053" "8443,8080" 2 1
+check "reject mismatched destination count" has_no_valid_batch tcp "443,2053" "8443"
 check "accept minimum health samples" valid_samples "5"
 check "accept maximum health samples" valid_samples "200"
 check "accept HYBRID mode" valid_mode "hybrid"

@@ -1,5 +1,17 @@
 # Changelog
 
+## 5.1.0 - 2026-10-13
+
+- Make the main panel numbered: 1) IRAN, 2) KHAREJ, followed by IPs and ports.
+- Configure all comma-separated ports during setup, with TCP, UDP or both.
+- Start GRE and selected forwarding services automatically after one confirmation.
+- Add a menu-driven batch port editor with ordered destination mappings.
+- Preserve unrelated rules and migrate selected ports between GRE and GOST.
+- Validate complete port lists before saving; reject empty, duplicate or invalid ports.
+- Release mutation locks before restarting GRE and between panel actions.
+- Add simulated user-flow tests for setup, cancellation, retries and rule migration.
+- Rewrite the bilingual guide around the numbered installation flow.
+
 ## 5.0.1 - 2026-10-13
 
 - Align the terminal and SVG branding with the new RIZAY Tunnel Manager name.

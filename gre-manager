@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly VERSION="5.0.1"
-readonly CONFIG_DIR="/etc/gre-manager"
+readonly VERSION="5.1.0"
+readonly CONFIG_DIR="${GRE_MANAGER_CONFIG_DIR:-/etc/gre-manager}"
 readonly CONFIG_FILE="$CONFIG_DIR/config.conf"
 readonly RULES_FILE="$CONFIG_DIR/rules.conf"
 readonly GOST_RULES_FILE="$CONFIG_DIR/gost-rules.conf"
@@ -36,6 +36,13 @@ LOCK_HELD=0
 DOCTOR_PASS=0
 DOCTOR_WARN=0
 DOCTOR_FAIL=0
+PORT_LIST=""
+PORT_LIST_ERROR=""
+PARSED_PORTS=()
+BATCH_SOURCES=()
+BATCH_DESTINATIONS=()
+BATCH_PROTOCOLS=()
+BATCH_ERROR=""
 
 export NEWT_COLORS='
 root=white,blue
@@ -70,6 +77,14 @@ acquire_lock() {
   exec 9>"$LOCK_FILE"
   flock -w 10 9 || die "another GRE Manager operation is still running"
   LOCK_HELD=1
+}
+
+release_lock() {
+  if (( LOCK_HELD == 1 )); then
+    flock -u 9
+    exec 9>&-
+    LOCK_HELD=0
+  fi
 }
 
 ipt() { iptables -w 5 "$@"; }
@@ -110,12 +125,63 @@ valid_ipv4() {
   done
 }
 
-valid_port() { [[ $1 =~ ^[0-9]+$ ]] && (( 10#$1 >= 1 && 10#$1 <= 65535 )); }
+valid_port() { [[ $1 =~ ^[0-9]{1,5}$ ]] && (( 10#$1 >= 1 && 10#$1 <= 65535 )); }
 valid_mtu() { [[ $1 =~ ^[0-9]+$ ]] && (( 10#$1 >= 576 && 10#$1 <= 9000 )); }
 valid_protocol() { [[ $1 == tcp || $1 == udp ]]; }
 valid_mode() { [[ $1 == hybrid || $1 == gre || $1 == gost ]]; }
 valid_transport() { [[ $1 == public || $1 == gre ]]; }
 valid_samples() { [[ $1 =~ ^[0-9]+$ ]] && (( 10#$1 >= 5 && 10#$1 <= 200 )); }
+
+parse_port_list() {
+  local input=$1 token port normalized=""
+  local -a tokens=() parsed=()
+  local -A seen=()
+  PORT_LIST=""; PARSED_PORTS=(); PORT_LIST_ERROR=""
+  if (( ${#input} > 8192 )) || [[ ! $input =~ ^[[:space:]]*[0-9]+[[:space:]]*(,[[:space:]]*[0-9]+[[:space:]]*)*$ ]]; then
+    PORT_LIST_ERROR="Enter ports separated by commas. Example: 443,8443,2053"
+    return 1
+  fi
+  IFS=',' read -r -a tokens <<< "$input"
+  if (( ${#tokens[@]} > 1000 )); then
+    PORT_LIST_ERROR="Enter at most 1000 ports at a time."
+    return 1
+  fi
+  for token in "${tokens[@]}"; do
+    token=${token//[[:space:]]/}
+    if ! valid_port "$token"; then
+      PORT_LIST_ERROR="Invalid port: $token. Every port must be between 1 and 65535."
+      return 1
+    fi
+    port=$((10#$token))
+    if [[ -n ${seen[$port]:-} ]]; then
+      PORT_LIST_ERROR="Port $port is repeated. Enter each port once."
+      return 1
+    fi
+    seen[$port]=1
+    parsed+=("$port")
+    normalized+="${normalized:+,}$port"
+  done
+  PORT_LIST=$normalized
+  PARSED_PORTS=("${parsed[@]}")
+}
+
+prepare_port_batch() {
+  local protocol=$1 sources=$2 destinations=${3:-$2}
+  BATCH_SOURCES=(); BATCH_DESTINATIONS=(); BATCH_PROTOCOLS=(); BATCH_ERROR=""
+  case "$protocol" in
+    tcp|udp) BATCH_PROTOCOLS=("$protocol") ;;
+    both) BATCH_PROTOCOLS=(tcp udp) ;;
+    *) BATCH_ERROR="Choose TCP, UDP or TCP + UDP."; return 1 ;;
+  esac
+  if ! parse_port_list "$sources"; then BATCH_ERROR=$PORT_LIST_ERROR; return 1; fi
+  BATCH_SOURCES=("${PARSED_PORTS[@]}")
+  if ! parse_port_list "$destinations"; then BATCH_ERROR=$PORT_LIST_ERROR; return 1; fi
+  BATCH_DESTINATIONS=("${PARSED_PORTS[@]}")
+  if (( ${#BATCH_SOURCES[@]} != ${#BATCH_DESTINATIONS[@]} )); then
+    BATCH_ERROR="IRAN and KHAREJ must have the same number of ports, in matching order."
+    return 1
+  fi
+}
 
 derive_endpoints() {
   case "$ROLE" in
@@ -161,6 +227,7 @@ load_config() {
 }
 
 save_config() {
+  if [[ -n ${1:-} ]]; then MODE=$1; fi
   validate_config
   acquire_lock
   install -d -m 700 "$CONFIG_DIR"
@@ -172,113 +239,259 @@ save_config() {
   mv -f "$tmp" "$CONFIG_FILE"
 }
 
+use_dialog() {
+  [[ ${GRE_MANAGER_UI:-terminal} == dialog ]] && command -v whiptail >/dev/null 2>&1
+}
+
+ui_menu() {
+  local title=$1 prompt=$2 choice tag label valid i
+  shift 2
+  local -a items=("$@")
+  if use_dialog; then
+    whiptail --title "$title" --menu "$prompt" 22 78 12 "${items[@]}" 3>&1 1>&2 2>&3
+    return
+  fi
+  while true; do
+    printf '\n%s\n%s\n\n' "$title" "$prompt" >&2
+    for ((i=0; i<${#items[@]}; i+=2)); do
+      tag=${items[$i]}; label=${items[$((i+1))]}
+      printf '  %s) %s\n' "$tag" "$label" >&2
+    done
+    printf '\nYour choice: ' >&2
+    read -r choice || return 1
+    valid=0
+    for ((i=0; i<${#items[@]}; i+=2)); do
+      [[ $choice != "${items[$i]}" ]] || valid=1
+    done
+    if (( valid == 1 )); then printf '%s' "$choice"; return 0; fi
+    printf 'Please choose one of the numbers shown above.\n' >&2
+  done
+}
+
+ui_confirm() {
+  local title=$1 message=$2 answer
+  if use_dialog; then
+    whiptail --title "$title" --yesno "$message" 20 78
+    return
+  fi
+  printf '\n%s\n%s\n\n1) Confirm and apply\n0) Cancel\nYour choice: ' "$title" "$message" >&2
+  read -r answer || return 1
+  [[ $answer == 1 ]]
+}
+
 ui_input() {
   local title=$1 prompt=$2 default_value=${3:-} result
-  if command -v whiptail >/dev/null 2>&1; then
+  if use_dialog; then
     result=$(whiptail --title "$title" --inputbox "$prompt" 10 72 "$default_value" 3>&1 1>&2 2>&3) || return 1
     printf '%s' "$result"
   else
-    read -r -p "$prompt [$default_value]: " result
+    printf '\n%s\n%s [%s]: ' "$title" "$prompt" "$default_value" >&2
+    read -r result || return 1
     printf '%s' "${result:-$default_value}"
   fi
 }
 
 ui_message() {
   local title=$1 message=$2
-  if command -v whiptail >/dev/null 2>&1; then
+  if use_dialog; then
     whiptail --title "$title" --msgbox "$message" 14 76
   else
     printf '\n%s\n%s\n\n' "$title" "$message"
   fi
 }
 
+ui_ports() {
+  local title=$1 prompt=$2 default_value=${3:-} input
+  while true; do
+    input=$(ui_input "$title" "$prompt" "$default_value") || return 1
+    if parse_port_list "$input"; then return 0; fi
+    ui_message "RIZAY - Check the ports" "$PORT_LIST_ERROR"
+  done
+}
+
+ui_protocol() {
+  local choice
+  choice=$(ui_menu "RIZAY - Protocol" "Choose which traffic to forward:" \
+    1 "TCP" 2 "UDP" 3 "TCP + UDP" 0 "Cancel") || return 1
+  case "$choice" in 1) printf 'tcp' ;; 2) printf 'udp' ;; 3) printf 'both' ;; *) return 1 ;; esac
+}
+
+ui_engine() {
+  local choice
+  choice=$(ui_menu "RIZAY - Forwarding method" "GRE is created between both servers. How should the ports be forwarded?" \
+    1 "GOST via KHAREJ public IP (recommended)" \
+    2 "GOST inside GRE" \
+    3 "GRE with iptables" 0 "Cancel") || return 1
+  case "$choice" in 1) printf 'gost-public' ;; 2) printf 'gost-gre' ;; 3) printf 'gre' ;; *) return 1 ;; esac
+}
+
 wizard() {
   require_root wizard
-  local role_choice mode_choice
+  local selected_role=${1:-} role_choice ports="" protocol="tcp" engine="gost-public" summary
+  if [[ -r $CONFIG_FILE ]]; then load_config; fi
   clear 2>/dev/null || true
   banner
-  if command -v whiptail >/dev/null 2>&1; then
-    role_choice=$(whiptail --title "RIZAY v$VERSION - Server role" \
-      --menu "This setup runs on both servers. Which server is this?" 16 78 2 \
-      IRAN "Gateway - receives users and forwards ports" \
-      KHAREJ "Destination - runs the final services" \
-      3>&1 1>&2 2>&3) || die "setup cancelled"
-    ROLE=${role_choice,,}
-  else
-    read -r -p "Server role (IRAN/KHAREJ): " ROLE
-    ROLE=${ROLE,,}
+  if [[ -z $selected_role ]]; then
+    role_choice=$(ui_menu "RIZAY - Step 1: Server" "Which server are you setting up?" \
+      1 "IRAN - users connect to this server" \
+      2 "KHAREJ - destination server" 0 "Cancel") || return 0
+    case "$role_choice" in 1) selected_role=iran ;; 2) selected_role=kharej ;; *) return 0 ;; esac
   fi
-  if command -v whiptail >/dev/null 2>&1; then
-    mode_choice=$(whiptail --title "RIZAY v$VERSION - Tunnel engine" \
-      --menu "Choose the tunnel stack. HYBRID is recommended." 17 78 3 \
-      HYBRID "GRE + GOST forwarding (recommended)" \
-      GRE "GRE tunnel and iptables forwarding only" \
-      GOST "GOST forwarding only (configured on IRAN)" \
-      3>&1 1>&2 2>&3) || die "setup cancelled"
-    MODE=${mode_choice,,}
-  else
-    read -r -p "Tunnel mode (HYBRID/GRE/GOST) [HYBRID]: " MODE
-    MODE=${MODE:-hybrid}
-    MODE=${MODE,,}
-  fi
+  [[ $selected_role == iran || $selected_role == kharej ]] || die "server role must be iran or kharej"
+  ROLE=$selected_role
+  MODE="hybrid"
   while true; do
-    IRAN_IP=$(ui_input "RIZAY - IRAN endpoint" "Public IPv4 of the IRAN server:" "$IRAN_IP") || die "setup cancelled"
+    IRAN_IP=$(ui_input "RIZAY - Step 2: IRAN IP" "Enter the public IPv4 of IRAN" "$IRAN_IP") || return 0
     valid_ipv4 "$IRAN_IP" && break
-    ui_message "RIZAY - Invalid IP" "Enter a valid public IPv4 for IRAN. Example: 203.0.113.10"
+    ui_message "RIZAY - Check the IP" "Enter a valid IPv4. Example: 203.0.113.10"
   done
   while true; do
-    KHAREJ_IP=$(ui_input "RIZAY - KHAREJ endpoint" "Public IPv4 of the KHAREJ destination server:" "$KHAREJ_IP") || die "setup cancelled"
+    KHAREJ_IP=$(ui_input "RIZAY - Step 3: KHAREJ IP" "Enter the public IPv4 of KHAREJ" "$KHAREJ_IP") || return 0
     if valid_ipv4 "$KHAREJ_IP" && [[ $KHAREJ_IP != "$IRAN_IP" ]]; then break; fi
-    ui_message "RIZAY - Invalid IP" "Enter a valid KHAREJ IPv4 different from the IRAN IP."
+    ui_message "RIZAY - Check the IP" "KHAREJ must be a valid IPv4 different from IRAN."
   done
-  while true; do
-    MTU=$(ui_input "RIZAY - MTU" "Tunnel MTU (1400 is recommended):" "${MTU:-1400}") || die "setup cancelled"
-    valid_mtu "$MTU" && break
-    ui_message "RIZAY - Invalid MTU" "MTU must be a number between 576 and 9000."
-  done
+  if [[ $ROLE == iran ]]; then
+    ui_ports "RIZAY - Step 4: Ports" \
+      "Enter ports separated by commas (example: 443,8443,2053). The same ports will be used on KHAREJ" "" || return 0
+    ports=$PORT_LIST
+    protocol=$(ui_protocol) || return 0
+    engine=$(ui_engine) || return 0
+    [[ $engine != gre ]] || MODE="gre"
+  fi
   validate_config
-
-  local role_text summary
-  if [[ $ROLE == iran ]]; then role_text="IRAN gateway / port-forward source"; else role_text="KHAREJ destination"; fi
-  summary="Role: $role_text
-Mode: ${MODE^^}
-IRAN public IP: $IRAN_IP
-KHAREJ public IP: $KHAREJ_IP
-Local GRE IP: $GRE_LOCAL/$GRE_PREFIX
-Remote GRE IP: $GRE_REMOTE
+  summary="Server: ${ROLE^^}
+IRAN IP: $IRAN_IP
+KHAREJ IP: $KHAREJ_IP
+GRE: $GRE_LOCAL -> $GRE_REMOTE
 MTU: $MTU"
-  if command -v whiptail >/dev/null 2>&1; then
-    whiptail --title "RIZAY - Confirm configuration" --yesno "$summary" 17 76 || die "setup cancelled"
+  if [[ $ROLE == iran ]]; then
+    summary+="
+Ports on IRAN and KHAREJ: $ports
+Protocol: ${protocol^^}
+Forwarding: ${engine^^}"
   else
-    printf '\n%s\n' "$summary"
+    summary+="
+Forwarding ports are selected on IRAN."
   fi
+  summary+="
+Existing rules on selected protocol/port pairs will be updated; other ports are kept."
+  ui_confirm "RIZAY - Final step: Confirm installation" "$summary" || { info "Setup cancelled. No settings were changed."; return 0; }
+  apply_setup "$engine" "$protocol" "$ports"
+  ui_message "RIZAY - Installation completed" "${ROLE^^} is configured. GRE is running.
+${ports:+All selected ports were saved and activated: $ports}
+Use the numbered panel to manage ports and check status."
+}
 
+save_port_batch() {
+  local engine=$1 protocol=$2 sources=$3 destinations=${4:-$3} transport=${5:-public}
+  local file other_file pending tmp other_tmp proto i
+  [[ $ROLE == iran ]] || die "forwarding ports are configured on IRAN"
+  [[ $engine == gre || $engine == gost ]] || die "unknown forwarding engine"
+  valid_transport "$transport" || die "path must be public or gre"
+  prepare_port_batch "$protocol" "$sources" "$destinations" || die "$BATCH_ERROR"
+  acquire_lock
+  install -d -m 700 "$CONFIG_DIR"
+  if [[ $engine == gost ]]; then file=$GOST_RULES_FILE; other_file=$RULES_FILE;
+  else file=$RULES_FILE; other_file=$GOST_RULES_FILE; fi
+  pending=$(mktemp "$CONFIG_DIR/batch.XXXXXX")
+  tmp=$(mktemp "$CONFIG_DIR/rules.XXXXXX")
+  other_tmp=$(mktemp "$CONFIG_DIR/rules.XXXXXX")
+  for proto in "${BATCH_PROTOCOLS[@]}"; do
+    for ((i=0; i<${#BATCH_SOURCES[@]}; i++)); do
+      printf '%s %s %s' "$proto" "${BATCH_SOURCES[$i]}" "${BATCH_DESTINATIONS[$i]}" >> "$pending"
+      if [[ $engine == gost ]]; then printf ' %s' "$transport" >> "$pending"; fi
+      printf '\n' >> "$pending"
+    done
+  done
+  if [[ -f $file ]]; then
+    awk 'NR == FNR { selected[$1 SUBSEP $2]=1; next } !($1 SUBSEP $2 in selected)' "$pending" "$file" > "$tmp"
+  fi
+  cat "$pending" >> "$tmp"
+  # A protocol/port pair can belong to only one engine; migrate the selected pairs.
+  if [[ -f $other_file ]]; then
+    awk 'NR == FNR { selected[$1 SUBSEP $2]=1; next } !($1 SUBSEP $2 in selected)' "$pending" "$other_file" > "$other_tmp"
+  fi
+  chmod 600 "$tmp" "$other_tmp"
+  mv -f "$tmp" "$file"
+  if [[ -f $other_file ]]; then mv -f "$other_tmp" "$other_file"; else rm -f -- "$other_tmp"; fi
+  rm -f -- "$pending"
+}
+
+apply_setup() (
+  set -Eeuo pipefail
+  local engine=$1 protocol=$2 ports=$3 backup_dir
+  if [[ $ROLE == iran ]]; then
+    prepare_port_batch "$protocol" "$ports" "$ports" || die "$BATCH_ERROR"
+    if [[ $engine == gost-* ]]; then install_gost_binary; fi
+  fi
+  acquire_lock
+  install -d -m 700 "$CONFIG_DIR/backup"
+  backup_dir=$(mktemp -d "$CONFIG_DIR/backup/setup.XXXXXX")
+  for file in "$CONFIG_FILE" "$RULES_FILE" "$GOST_RULES_FILE" "$GOST_CONFIG_FILE"; do
+    [[ ! -f $file ]] || cp -p -- "$file" "$backup_dir/"
+  done
   save_config
-  if [[ $MODE != gost ]]; then start_tunnel; fi
-  command -v systemctl >/dev/null 2>&1 && systemctl enable gre-manager.service >/dev/null 2>&1 || true
-  clear 2>/dev/null || true
-  banner
-  info "$summary"
-  if [[ $ROLE == iran && $MODE != gre ]]; then
-    info ""
-    info "GOST is ready for its first rule:"
-    info "  sudo gre-manager add-gost tcp IRAN_PORT KHAREJ_PORT public"
-  elif [[ $ROLE == iran ]]; then
-    info ""
-    info "IRAN gateway is ready. Add a forward with:"
-    info "  sudo gre-manager add-rule tcp IRAN_PORT KHAREJ_PORT"
+  if [[ $ROLE == iran ]]; then
+    case "$engine" in
+      gost-public) save_port_batch gost "$protocol" "$ports" "$ports" public ;;
+      gost-gre) save_port_batch gost "$protocol" "$ports" "$ports" gre ;;
+      gre) save_port_batch gre "$protocol" "$ports" "$ports" ;;
+      *) die "unknown forwarding method" ;;
+    esac
+    if [[ -s $GOST_RULES_FILE ]]; then save_config hybrid; fi
+  fi
+  release_lock
+  if [[ $ROLE == iran ]]; then systemctl stop "$GOST_SERVICE" >/dev/null 2>&1 || true; fi
+  systemctl enable gre-manager.service >/dev/null
+  systemctl restart gre-manager.service
+  if [[ $ROLE == iran ]]; then
+    sync_gost
   else
-    info ""
-    info "KHAREJ destination is ready. Configure the IRAN server next."
+    # The destination does not run a forwarding listener.
+    systemctl disable --now "$GOST_SERVICE" >/dev/null 2>&1 || true
   fi
-  info ""
-  if [[ $ROLE == iran && $MODE != gre ]] && command -v whiptail >/dev/null 2>&1; then
-    if whiptail --title "RIZAY - First GOST rule" --yesno \
-      "HYBRID setup is ready. Do you want to add the first GOST port now?" 11 72; then
-      add_gost_rule
+  release_lock
+  info "Setup applied. Previous settings saved in: $backup_dir"
+)
+
+add_ports_wizard() {
+  require_root add-ports
+  load_config || die "choose 1) IRAN or 2) KHAREJ in the panel first"
+  [[ $ROLE == iran ]] || { ui_message "RIZAY - Ports" "Port forwarding is configured on IRAN. KHAREJ runs the destination services."; return 0; }
+  local engine=${1:-} protocol sources destinations transport="public"
+  ui_ports "RIZAY - Add ports" "IRAN ports, separated by commas (example: 443,8443,2053)" "" || return 0
+  sources=$PORT_LIST
+  ui_ports "RIZAY - KHAREJ ports" "Press Enter to use the same ports, or enter a matching list in the same order" "$sources" || return 0
+  destinations=$PORT_LIST
+  protocol=$(ui_protocol) || return 0
+  [[ -n $engine ]] || engine=$(ui_engine) || return 0
+  [[ $engine != gost-public ]] || transport="public"
+  [[ $engine != gost-gre ]] || transport="gre"
+  prepare_port_batch "$protocol" "$sources" "$destinations" || { ui_message "RIZAY - Ports" "$BATCH_ERROR"; return 0; }
+  ui_confirm "RIZAY - Confirm ports" "IRAN: $sources
+KHAREJ: $destinations
+Protocol: ${protocol^^}
+Method: ${engine^^}
+Existing rules on these protocol/port pairs will be updated; other ports are kept." || return 0
+  (
+    set -Eeuo pipefail
+    if [[ $engine == gost-* ]]; then
+      install_gost_binary
+      save_config hybrid
+      save_port_batch gost "$protocol" "$sources" "$destinations" "$transport"
+    else
+      [[ $MODE != gost ]] || save_config hybrid
+      save_port_batch gre "$protocol" "$sources" "$destinations"
     fi
-  fi
-  health 20 || true
+    release_lock
+    # Stop old GOST listeners before GRE claims migrated ports.
+    systemctl stop "$GOST_SERVICE" >/dev/null 2>&1 || true
+    systemctl enable gre-manager.service >/dev/null
+    systemctl restart gre-manager.service
+    sync_gost
+    release_lock
+  )
+  ui_message "RIZAY - Ports ready" "All selected ports were saved and activated."
 }
 
 detect_public_iface() {
@@ -390,15 +603,13 @@ restart_stack() {
 }
 
 add_rule() {
+  if (( $# == 0 )); then add_ports_wizard gre; return; fi
   require_root add-rule
   load_config || die "not configured; run: sudo gre-manager wizard"
   [[ $ROLE == iran ]] || die "run add-rule on the IRAN server; KHAREJ is the destination"
   [[ $MODE != gost ]] || die "GRE rules are disabled in GOST mode; use add-gost or rerun wizard with HYBRID"
   local protocol=${1:-} source_port=${2:-} destination_port=${3:-} tmp
-  if [[ -z $protocol ]] && command -v whiptail >/dev/null 2>&1; then
-    protocol=$(whiptail --title "RIZAY - Protocol" --menu "Choose protocol" 13 54 2 \
-      tcp "TCP" udp "UDP" 3>&1 1>&2 2>&3) || die "cancelled"
-  fi
+  if [[ -z $protocol ]]; then protocol=$(ui_protocol) || return 0; fi
   [[ -n $protocol ]] || read -r -p "Protocol (tcp/udp): " protocol
   [[ -n $source_port ]] || source_port=$(ui_input "RIZAY - IRAN port" "Port users connect to on the IRAN server:" "")
   [[ -n $destination_port ]] || destination_port=$(ui_input "RIZAY - KHAREJ port" "Final service port on the KHAREJ server:" "$source_port")
@@ -426,10 +637,10 @@ remove_rule() {
   require_root remove-rule
   load_config || die "not configured; run: sudo gre-manager wizard"
   [[ $ROLE == iran ]] || die "rules are managed on the IRAN server"
-  local protocol=${1:-} source_port=${2:-} tmp
-  if [[ -z $protocol ]] && command -v whiptail >/dev/null 2>&1; then
-    protocol=$(whiptail --title "RIZAY - Protocol" --menu "Rule protocol" 13 54 2 \
-      tcp "TCP" udp "UDP" 3>&1 1>&2 2>&3) || die "cancelled"
+  local protocol=${1:-} source_port=${2:-} tmp choice
+  if [[ -z $protocol ]]; then
+    choice=$(ui_menu "RIZAY - Remove GRE rule" "Choose the rule protocol" 1 "TCP" 2 "UDP" 0 "Cancel") || return 0
+    case "$choice" in 1) protocol=tcp ;; 2) protocol=udp ;; *) return 0 ;; esac
   fi
   [[ -n $protocol ]] || read -r -p "Protocol (tcp/udp): " protocol
   [[ -n $source_port ]] || source_port=$(ui_input "RIZAY - Remove rule" "IRAN public port to remove:" "")
@@ -455,7 +666,7 @@ list_rules() {
   load_config || die "not configured; run: sudo gre-manager wizard"
   if [[ ! -s $RULES_FILE ]]; then info "No saved rules."; return; fi
   printf '%-8s %-14s %s\n' PROTOCOL IRAN_PORT KHAREJ_PORT
-  awk '!/^($|#)/ { printf "%-8s %-14s %s\\n", $1, $2, $3 }' "$RULES_FILE"
+  awk '!/^($|#)/ { printf "%-8s %-14s %s\n", $1, $2, $3 }' "$RULES_FILE"
 }
 
 clear_rules() {
@@ -573,22 +784,15 @@ sync_gost() {
 }
 
 add_gost_rule() {
+  if (( $# == 0 )); then add_ports_wizard gost-public; return; fi
   require_root add-gost
   load_config || die "not configured; run: sudo gre-manager wizard"
   [[ $ROLE == iran ]] || die "run add-gost on IRAN; KHAREJ is the destination"
   local protocol=${1:-} source_port=${2:-} destination_port=${3:-} transport=${4:-} tmp
-  if [[ -z $protocol ]] && command -v whiptail >/dev/null 2>&1; then
-    protocol=$(whiptail --title "RIZAY - GOST protocol" --menu "Choose listener protocol" 13 58 2 \
-      tcp "TCP forwarding" udp "UDP forwarding" 3>&1 1>&2 2>&3) || die "cancelled"
-  fi
+  if [[ -z $protocol ]]; then protocol=$(ui_protocol) || return 0; fi
   [[ -n $protocol ]] || read -r -p "Protocol (tcp/udp): " protocol
   [[ -n $source_port ]] || source_port=$(ui_input "RIZAY - GOST IRAN port" "Port users connect to on IRAN:" "")
   [[ -n $destination_port ]] || destination_port=$(ui_input "RIZAY - GOST KHAREJ port" "Final service port on KHAREJ:" "$source_port")
-  if [[ -z $transport ]] && command -v whiptail >/dev/null 2>&1; then
-    transport=$(whiptail --title "RIZAY - GOST path" --menu "Choose the path to KHAREJ" 15 72 2 \
-      public "Direct public IP (independent from GRE)" \
-      gre "Inside GRE (private 10.77.0.x path)" 3>&1 1>&2 2>&3) || die "cancelled"
-  fi
   transport=${transport:-public}
   valid_protocol "$protocol" || die "protocol must be tcp or udp"
   valid_port "$source_port" || die "IRAN port must be 1-65535"
@@ -617,10 +821,10 @@ remove_gost_rule() {
   require_root remove-gost
   load_config || die "not configured; run: sudo gre-manager wizard"
   [[ $ROLE == iran ]] || die "GOST rules are managed on IRAN"
-  local protocol=${1:-} source_port=${2:-} tmp
-  if [[ -z $protocol ]] && command -v whiptail >/dev/null 2>&1; then
-    protocol=$(whiptail --title "RIZAY - GOST protocol" --menu "Rule protocol" 13 54 2 \
-      tcp "TCP" udp "UDP" 3>&1 1>&2 2>&3) || die "cancelled"
+  local protocol=${1:-} source_port=${2:-} tmp choice
+  if [[ -z $protocol ]]; then
+    choice=$(ui_menu "RIZAY - Remove GOST rule" "Choose the rule protocol" 1 "TCP" 2 "UDP" 0 "Cancel") || return 0
+    case "$choice" in 1) protocol=tcp ;; 2) protocol=udp ;; *) return 0 ;; esac
   fi
   [[ -n $protocol ]] || read -r -p "Protocol (tcp/udp): " protocol
   [[ -n $source_port ]] || source_port=$(ui_input "RIZAY - Remove GOST" "IRAN listener port to remove:" "")
@@ -645,7 +849,7 @@ list_gost_rules() {
   load_config || die "not configured; run: sudo gre-manager wizard"
   if [[ ! -s $GOST_RULES_FILE ]]; then info "No saved GOST rules."; return; fi
   printf '%-8s %-12s %-14s %s\n' PROTOCOL IRAN_PORT KHAREJ_PORT PATH
-  awk '!/^($|#)/ { printf "%-8s %-12s %-14s %s\\n", $1, $2, $3, toupper($4) }' "$GOST_RULES_FILE"
+  awk '!/^($|#)/ { printf "%-8s %-12s %-14s %s\n", $1, $2, $3, toupper($4) }' "$GOST_RULES_FILE"
 }
 
 clear_gost_rules() {
@@ -897,10 +1101,7 @@ status() {
 optimize_network() {
   require_root optimize
   local bbr=0 tmp
-  if command -v whiptail >/dev/null 2>&1; then
-    whiptail --title "RIZAY - Safe network optimizer" --yesno \
-      "Apply persistent tunnel-friendly settings?\n\n- FQ queue discipline\n- TCP MTU probing\n- Longer keepalive\n- BBR only when supported\n\nNo cache deletion or blind kernel tweaks are used." 17 76 || return 0
-  fi
+  ui_confirm "RIZAY - Network optimizer" "Apply FQ, TCP MTU probing, keepalive and BBR (when supported)?" || return 0
   acquire_lock
   modprobe tcp_bbr >/dev/null 2>&1 || true
   if sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null | grep -qw bbr; then bbr=1; fi
@@ -922,10 +1123,7 @@ EOF
 restore_network_defaults() {
   require_root restore-network
   if [[ ! -f $OPTIMIZE_FILE ]]; then info "RIZAY optimization is not installed."; return 0; fi
-  if command -v whiptail >/dev/null 2>&1; then
-    whiptail --title "RIZAY - Restore network defaults" --yesno \
-      "Remove the RIZAY sysctl profile? Existing kernel values will return to distribution defaults after reboot." 12 74 || return 0
-  fi
+  ui_confirm "RIZAY - Restore network defaults" "Remove the RIZAY sysctl profile? Distribution defaults will return after reboot." || return 0
   rm -f -- "$OPTIMIZE_FILE"
   info "RIZAY sysctl profile removed. Reboot to restore distribution defaults."
 }
@@ -943,20 +1141,16 @@ pause_menu() {
 tunnel_menu() {
   local choice
   while true; do
-    choice=$(whiptail --title "RIZAY - Tunnel Center" --menu "GRE + GOST engine control" 20 78 8 \
-      wizard "Run HYBRID / GRE / GOST setup" \
-      status "Live stack dashboard" \
-      start "Start selected tunnel stack" \
-      restart "Restart selected tunnel stack" \
-      stop "Stop selected tunnel stack" \
-      install-gost "Install or verify official GOST" \
-      update-gost "Reinstall verified GOST v$GOST_VERSION" \
-      back "Back to main panel" 3>&1 1>&2 2>&3) || return 0
+    choice=$(ui_menu "RIZAY - Tunnel Center" "GRE + GOST engine control" \
+      1 "Step-by-step IRAN / KHAREJ setup" \
+      2 "Live stack dashboard" 3 "Start selected tunnel stack" \
+      4 "Restart selected tunnel stack" 5 "Stop selected tunnel stack" \
+      6 "Install or verify official GOST" 7 "Reinstall GOST v$GOST_VERSION" \
+      0 "Back to main panel") || return 0
     case "$choice" in
-      wizard) wizard; return 0 ;; status) status || true ;; start) start_stack || true ;;
-      restart) restart_stack || true ;; stop) stop_stack || true ;;
-      install-gost) install_gost_binary || true ;; update-gost) install_gost_binary --force || true ;;
-      back) return 0 ;;
+      1) wizard ;; 2) status || true ;; 3) (start_stack) ;;
+      4) (restart_stack) ;; 5) (stop_stack) ;;
+      6) (install_gost_binary) ;; 7) (install_gost_binary --force) ;; 0) return 0 ;;
     esac
     pause_menu
   done
@@ -965,22 +1159,15 @@ tunnel_menu() {
 port_menu() {
   local choice
   while true; do
-    choice=$(whiptail --title "RIZAY - Port Manager" --menu "Choose GRE or GOST forwarding" 22 80 10 \
-      add-gre "Add iptables rule through GRE" \
-      add-gost "Add GOST rule through PUBLIC or GRE path" \
-      remove-gre "Remove one GRE rule" \
-      remove-gost "Remove one GOST rule" \
-      list-gre "List GRE rules" \
-      list-gost "List GOST rules" \
-      firewall "Show live GRE firewall counters" \
-      clear-gre "Clear every GRE rule" \
-      clear-gost "Clear every GOST rule" \
-      back "Back to main panel" 3>&1 1>&2 2>&3) || return 0
+    choice=$(ui_menu "RIZAY - Port Manager" "Enter multiple ports with commas. No forwarding commands are needed." \
+      1 "Add ports - choose GOST or GRE" 2 "Remove one GRE rule" \
+      3 "Remove one GOST rule" 4 "List GRE rules" 5 "List GOST rules" \
+      6 "Live GRE firewall counters" 7 "Clear every GRE rule" \
+      8 "Clear every GOST rule" 0 "Back to main panel") || return 0
     case "$choice" in
-      add-gre) add_rule ;; add-gost) add_gost_rule ;; remove-gre) remove_rule ;;
-      remove-gost) remove_gost_rule ;; list-gre) list_rules ;; list-gost) list_gost_rules ;;
-      firewall) firewall_rules || true ;; clear-gre) clear_rules ;; clear-gost) clear_gost_rules ;;
-      back) return 0 ;;
+      1) add_ports_wizard ;; 2) (remove_rule; release_lock) ;; 3) (remove_gost_rule; release_lock) ;;
+      4) list_rules ;; 5) list_gost_rules ;; 6) firewall_rules || true ;;
+      7) (clear_rules) ;; 8) (clear_gost_rules) ;; 0) return 0 ;;
     esac
     pause_menu
   done
@@ -989,18 +1176,14 @@ port_menu() {
 health_menu() {
   local choice port
   while true; do
-    choice=$(whiptail --title "RIZAY - Health Center" --menu "Real measurements and deterministic checks" 19 78 6 \
-      health "Packet loss, RTT, jitter and readiness" \
-      service "Probe a TCP service on KHAREJ" \
-      doctor "Full GRE + GOST diagnostics" \
-      firewall "Live packet and byte counters" \
-      logs "Last 80 GOST log lines" \
-      back "Back to main panel" 3>&1 1>&2 2>&3) || return 0
+    choice=$(ui_menu "RIZAY - Health Center" "Real measurements and deterministic checks" \
+      1 "Packet loss, RTT, jitter and readiness" 2 "Probe a TCP service on KHAREJ" \
+      3 "Full GRE + GOST diagnostics" 4 "Live packet and byte counters" \
+      5 "Last 80 GOST log lines" 0 "Back to main panel") || return 0
     case "$choice" in
-      health) health 50 || true ;;
-      service) port=$(ui_input "RIZAY - TCP probe" "KHAREJ TCP service port:" "443") || continue; health 50 "$port" || true ;;
-      doctor) doctor || true ;; firewall) firewall_rules || true ;; logs) gost_logs 80 || true ;;
-      back) return 0 ;;
+      1) health 50 || true ;;
+      2) port=$(ui_input "RIZAY - TCP probe" "KHAREJ TCP service port:" "443") || continue; health 50 "$port" || true ;;
+      3) doctor || true ;; 4) firewall_rules || true ;; 5) gost_logs 80 || true ;; 0) return 0 ;;
     esac
     pause_menu
   done
@@ -1009,13 +1192,11 @@ health_menu() {
 maintenance_menu() {
   local choice
   while true; do
-    choice=$(whiptail --title "RIZAY - Maintenance" --menu "Repair and safe optimization" 17 78 4 \
-      repair "Rebuild GRE + GOST and run Doctor" \
-      optimize "Apply safe FQ / MTU / optional BBR tuning" \
-      restore "Remove the RIZAY optimization profile" \
-      back "Back to main panel" 3>&1 1>&2 2>&3) || return 0
-    case "$choice" in repair) repair || true ;; optimize) optimize_network || true ;;
-      restore) restore_network_defaults || true ;; back) return 0 ;; esac
+    choice=$(ui_menu "RIZAY - Maintenance" "Repair and safe optimization" \
+      1 "Rebuild GRE + GOST and run Doctor" 2 "Apply FQ / MTU / optional BBR tuning" \
+      3 "Remove the RIZAY optimization profile" 0 "Back to main panel") || return 0
+    case "$choice" in 1) (repair) ;; 2) (optimize_network) ;;
+      3) (restore_network_defaults) ;; 0) return 0 ;; esac
     pause_menu
   done
 }
@@ -1026,33 +1207,27 @@ menu() {
   while true; do
     clear 2>/dev/null || true
     banner
-    if command -v whiptail >/dev/null 2>&1; then
-      choice=$(whiptail --title "RIZAY Tunnel Manager v$VERSION" --menu \
-        "IRAN <-> KHAREJ | GRE + GOST professional panel" 21 82 7 \
-        quick "Quick HYBRID setup wizard" \
-        tunnels "Tunnel Center - GRE + GOST engines" \
-        ports "Port Manager - GRE + GOST rules" \
-        health "Health Center - loss, RTT and Doctor" \
-        status "Live Dashboard" \
-        maintenance "Repair and safe optimization" \
-        about "About RIZAY / @rizay_041" \
-        exit "Exit" 3>&1 1>&2 2>&3) || return 0
-    else
-      printf '1) Setup  2) Status  3) Health  4) Add GRE  5) Add GOST\n6) Doctor 7) Restart 8) About   9) Exit\n'
-      read -r -p "Choice: " choice
-      case "$choice" in
-        1) choice='quick' ;; 2) choice='status' ;; 3) choice='health-cli' ;;
-        4) choice='add-gre' ;; 5) choice='add-gost' ;; 6) choice='doctor-cli' ;;
-        7) choice='restart-cli' ;; 8) choice='about' ;; 9) choice='exit' ;;
-      esac
-    fi
+    choice=$(ui_menu "RIZAY Tunnel Manager v$VERSION" "Select a number. Installation is step by step." \
+      1 "IRAN - setup IPs and comma-separated ports" \
+      2 "KHAREJ - setup the destination server" \
+      3 "Add or change ports" 4 "Status and saved ports" \
+      5 "Health Center - packet loss and Doctor" 6 "Port Manager" \
+      7 "Tunnel Center - start / stop / restart" 8 "Maintenance and optimization" \
+      9 "About RIZAY / @rizay_041" 0 "Exit") || return 0
     case "$choice" in
-      quick) wizard; return 0 ;; tunnels) tunnel_menu ;; ports) port_menu ;; health) health_menu ;;
-      status) status || true ;; maintenance) maintenance_menu ;; about) about ;;
-      health-cli) health 50 || true ;; doctor-cli) doctor || true ;; restart-cli) restart_stack || true ;;
-      add-gre) add_rule ;; add-gost) add_gost_rule ;; exit) return 0 ;; *) info "Invalid choice." ;;
+      1|2|9|0) ;;
+      *) if [[ ! -r $CONFIG_FILE ]]; then
+           ui_message "RIZAY - Setup first" "Choose 1) IRAN or 2) KHAREJ to configure this server first."
+           continue
+         fi ;;
     esac
-    [[ $choice == tunnels || $choice == ports || $choice == health || $choice == maintenance ]] || pause_menu
+    case "$choice" in
+      1) wizard iran ;; 2) wizard kharej ;; 3) add_ports_wizard ;;
+      4) status || true; list_rules; list_gost_rules ;;
+      5) health_menu ;; 6) port_menu ;; 7) tunnel_menu ;; 8) maintenance_menu ;;
+      9) about ;; 0) return 0 ;;
+    esac
+    case "$choice" in 5|6|7|8) ;; *) pause_menu ;; esac
   done
 }
 
@@ -1061,7 +1236,8 @@ usage() {
 RIZAY Tunnel Manager - HYBRID GRE + GOST for IRAN and KHAREJ
 
 Usage: gre-manager COMMAND [ARGS]
-  wizard                     Graphical IRAN/KHAREJ setup
+  wizard [iran|kharej]       Step-by-step setup with comma-separated ports
+  add-ports                  Add multiple ports through the numbered panel
   doctor                     Run deterministic system and firewall checks
   health [5-200] [TCP_PORT]  Measure loss, jitter, readiness and optional service
   start|stop|restart         Control the selected GRE + GOST stack
@@ -1087,7 +1263,8 @@ EOF
 
 main() {
   case "${1:-menu}" in
-    wizard|configure) wizard ;; doctor) doctor ;; health) shift; health "${1:-50}" "${2:-}" ;;
+    wizard|configure) shift; wizard "${1:-}" ;; add-ports) add_ports_wizard ;;
+    doctor) doctor ;; health) shift; health "${1:-50}" "${2:-}" ;;
     start) start_stack ;; stop) stop_stack ;; restart) restart_stack ;;
     start-gre) start_tunnel ;; stop-gre) stop_tunnel ;;
     repair) repair ;; status) shift; status "${1:-}" ;; add-rule) shift; add_rule "$@" ;;

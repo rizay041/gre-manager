@@ -1,163 +1,94 @@
 ![RIZAY Tunnel Manager](assets/rizay-logo.svg)
 
-# RIZAY Tunnel Manager v5.0.1
+# RIZAY Tunnel Manager v5.1.0
 
-پنل حرفه‌ای و سبک برای ساخت تونل بین سرورهای `IRAN` و `KHAREJ` با دو موتور `GRE` و `GOST`.
+نصب مرحله‌به‌مرحله GRE و GOST بین `IRAN` و `KHAREJ`؛ با پنل عددی آبی و پورت‌های جداشده با `,`.
 
 ## راهنمای فارسی
 
-### نصب با فقط یک خط
-
-این دستور را روی هر دو سرور اجرا کن:
+### فقط یک‌بار این دستور را روی هر سرور بزن
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rizay041/gre-manager/main/quick-install.sh | sudo bash
 ```
 
-نصاب آخرین Release را دانلود می‌کند، امضای `SHA256` آن را بررسی می‌کند، پیش‌نیازها را نصب می‌کند و پنل آبی `RIZAY` را باز می‌کند.
+نصاب برنامه را دانلود و checksum را بررسی می‌کند، پیش‌نیازها را نصب می‌کند و این پنل را باز می‌کند:
 
-### داخل نصب‌کننده چه انتخاب کنم؟
+```text
+1) IRAN - setup IPs and comma-separated ports
+2) KHAREJ - setup the destination server
+3) Add or change ports
+4) Status and saved ports
+5) Health Center - packet loss and Doctor
+6) Port Manager
+7) Tunnel Center - start / stop / restart
+8) Maintenance and optimization
+9) About RIZAY / @rizay_041
+0) Exit
+```
 
-روی هر دو سرور حالت پیشنهادی `HYBRID` را انتخاب کن:
+### اول روی سرور KHAREJ
 
-- سروری که کاربر به آن وصل می‌شود: `IRAN`
-- سروری که سرویس اصلی روی آن است: `KHAREJ`
-- در هر دو سرور، Public IPv4 هر دو سمت را یکسان وارد کن.
-- مقدار پیشنهادی `MTU` برابر `1400` است.
+1. عدد `2` را بزن.
+2. IP عمومی سرور `IRAN` را وارد کن.
+3. IP عمومی همین سرور `KHAREJ` را وارد کن.
+4. مشخصات را ببین و با عدد `1` نصب را تأیید کن.
 
-GRE به‌صورت خودکار این IPها را می‌سازد:
+تمام! GRE روی مقصد راه می‌افتد. پورت‌ها را در مرحله بعد روی سرور ایران تعیین می‌کنی؛ سرویس اصلی باید روی پورت موردنظر سرور خارج در حال اجرا باشد.
 
-- `IRAN`: `10.77.0.1/30`
-- `KHAREJ`: `10.77.0.2/30`
+### بعد روی سرور IRAN
 
-در حالت `HYBRID`، GRE روی هر دو سرور اجرا می‌شود. سرویس GOST فقط روی `IRAN` لازم است و ترافیک پورت انتخابی را به `KHAREJ` می‌فرستد.
+1. عدد `1` را بزن.
+2. IP عمومی `IRAN` را وارد کن.
+3. IP عمومی `KHAREJ` را وارد کن؛ همان IPهایی که در سمت مقابل دادی.
+4. پورت‌ها را یک‌جا و با کامای انگلیسی بنویس؛ مثلاً `443,8443,2053`.
+5. پروتکل را انتخاب کن: `1` برای TCP، `2` برای UDP، `3` برای هر دو.
+6. روش انتقال را انتخاب کن: `1` برای GOST مستقیم، `2` برای GOST داخل GRE، `3` برای GRE و iptables.
+7. خلاصه را بررسی کن و با عدد `1` تأیید کن.
 
-### پنل گرافیکی
+همه پورت‌ها خودکار ذخیره و فعال می‌شوند. لازم نیست برای هر پورت دستور جداگانه بنویسی. در نصب اولیه، شماره پورت ایران و خارج یکسان است؛ مثلاً `443` ایران به `443` خارج می‌رود. GRE هم روی هر دو سرور برقرار می‌شود.
 
-هر وقت خواستی پنل را دوباره باز کنی:
+### پورت بیشتری می‌خوای؟
+
+هر وقت خواستی پنل را باز کن:
 
 ```bash
 sudo gre-manager
 ```
 
-بخش‌های پنل:
+روی `IRAN` گزینه `3` را انتخاب کن و پورت‌ها را با `,` وارد کن. برای پورت‌های `KHAREJ` فقط Enter بزن تا همان شماره‌ها استفاده شوند؛ یا یک لیست هم‌تعداد به‌ترتیب وارد کن. مثال: `443,2053` در ایران و `8443,8080` در خارج یعنی انتقال `443 → 8443` و `2053 → 8080`.
 
-- `Tunnel Center`: نصب و کنترل GRE و GOST
-- `Port Manager`: اضافه، حذف و نمایش پورت‌ها
-- `Health Center`: Packet Loss، RTT، Jitter، سرویس‌تست و Doctor
-- `Live Dashboard`: وضعیت زنده هر دو موتور
-- `Maintenance`: تعمیر خودکار و بهینه‌سازی امن شبکه
+پورت‌های دیگر حفظ می‌شوند. اگر پورت انتخابی قبلاً تنظیم شده باشد، همان Rule به‌روزرسانی می‌شود. هر پروتکل/پورت هم‌زمان به یک موتور تعلق دارد؛ تغییر روش انتقال، Rule همان پورت را بین GOST و GRE جابه‌جا می‌کند.
 
-### انتقال پورت با GOST
+### بررسی وضعیت و کیفیت
 
-ساده‌ترین حالت، انتقال مستقیم پورت `443` سرور `IRAN` به پورت `8443` سرور `KHAREJ` است:
+- گزینه `4`: وضعیت سرویس‌ها و لیست پورت‌ها.
+- گزینه `5`: Packet Loss، RTT، Jitter، تست TCP و Doctor.
+- گزینه `6`: حذف یا مدیریت پورت‌ها.
+- گزینه `7`: Start، Stop و Restart.
+- گزینه `8`: Repair و بهینه‌سازی اختیاری شبکه.
 
-```bash
-sudo gre-manager add-gost tcp 443 8443 public
-```
+امتیاز آمادگی یک گزارش تشخیصی است. برای مقایسه دوطرفه، Health را روی هر دو سرور اجرا کن. تنظیمات پیش‌فرض GRE: `10.77.0.1/30` در ایران، `10.77.0.2/30` در خارج و MTU برابر `1400`.
 
-اگر می‌خواهی GOST ترافیک را داخل GRE عبور دهد:
-
-```bash
-sudo gre-manager add-gost tcp 443 8443 gre
-```
-
-برای UDP، به‌جای `tcp` بنویس `udp`. باینری رسمی GOST v3.3.0 با اولین Rule دانلود می‌شود و checksum رسمی آن قبل از نصب بررسی خواهد شد. این باینری جدا از GOST احتمالی خود سیستم نگهداری می‌شود.
-
-### انتقال پورت با GRE و iptables
-
-این دستور را فقط روی سرور `IRAN` اجرا کن:
-
-```bash
-sudo gre-manager add-rule tcp 443 8443
-```
-
-### تست واقعی کیفیت مسیر
-
-```bash
-sudo gre-manager health
-sudo gre-manager health 100
-sudo gre-manager health 100 443
-```
-
-گزارش شامل Packet Loss مسیر Public و GRE، کمینه/میانگین/بیشینه RTT، Jitter، وضعیت هر دو موتور و امتیاز آمادگی است. این امتیاز تشخیصی است و تضمین آماری محسوب نمی‌شود. تست را روی هر دو سرور اجرا کن.
-
-### Doctor، Repair و بهینه‌سازی
-
-```bash
-sudo gre-manager doctor
-sudo gre-manager repair
-sudo gre-manager optimize
-sudo gre-manager status --json
-```
-
-`optimize` فقط تنظیمات مشخص و قابل‌بازگشت شامل FQ، TCP MTU probing و در صورت پشتیبانی کرنل BBR را اعمال می‌کند. برای حذف پروفایل:
-
-```bash
-sudo gre-manager restore-network
-```
-
-### دستورهای کاربردی
-
-```bash
-sudo gre-manager status
-sudo gre-manager list-rules
-sudo gre-manager list-gost
-sudo gre-manager remove-gost tcp 443
-sudo gre-manager gost-logs
-sudo gre-manager restart
-```
-
-### نکته امنیتی مهم
-
-GRE رمزنگاری ندارد. انتقال ساده GOST در حالت `public` هم به‌خودی‌خود رمزنگاری‌شده نیست. برای داده حساس از WireGuard یا IPsec استفاده کن و در Firewall فقط پورت‌ها و IPهای لازم را باز بگذار.
+GOST رسمی v3.3.0 با checksum نصب می‌شود. GRE و انتقال مستقیم GOST به‌خودی‌خود رمزنگاری ندارند. در Firewall پروتکل GRE شماره `47` را بین دو IP و پورت‌های موردنیاز سرویس را مجاز کن.
 
 ---
 
-## English Guide
+## English guide
 
-RIZAY is a bilingual terminal panel for managing a `GRE`, `GOST`, or recommended `HYBRID` stack between an `IRAN` gateway and a `KHAREJ` destination.
+Run the one-line installer above on both Linux/systemd servers. The numbered panel handles the entire setup; no per-port commands are needed.
 
-### One-line installation
+1. On the destination, choose `2) KHAREJ`, enter both public IPv4 addresses, and confirm with `1`.
+2. On the gateway, choose `1) IRAN`, enter the same IPs, and enter ports such as `443,8443,2053`.
+3. Choose TCP, UDP, or both, then select GOST public forwarding, GOST inside GRE, or GRE/iptables forwarding.
+4. Review the summary and confirm with `1`. GRE and all selected forwarding ports start automatically.
 
-Run on both servers:
+Use `sudo gre-manager` to reopen the panel. Option `3` adds or updates comma-separated ports, with optional matching destination ports. Other rules are preserved. Cancelling setup applies no changes.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/rizay041/gre-manager/main/quick-install.sh | sudo bash
-```
-
-Choose `HYBRID`, select the local server role, enter both public IPv4 addresses, and keep MTU `1400` unless your network requires a lower value.
-
-### GOST forwarding on IRAN
-
-```bash
-sudo gre-manager add-gost tcp 443 8443 public
-sudo gre-manager add-gost udp 443 8443 public
-sudo gre-manager add-gost tcp 8443 8443 gre
-```
-
-`public` sends directly to the KHAREJ public IP and stays independent of GRE. `gre` targets the private GRE peer. The official pinned GOST binary is checksum-verified and installed in an isolated RIZAY path.
-
-### GRE forwarding on IRAN
-
-```bash
-sudo gre-manager add-rule tcp 443 8443
-```
-
-### Diagnostics and maintenance
-
-```bash
-sudo gre-manager health 100 443
-sudo gre-manager doctor
-sudo gre-manager repair
-sudo gre-manager status --json
-sudo gre-manager optimize
-```
-
-GRE and plain GOST port forwarding do not provide encryption. Use WireGuard or IPsec when confidentiality is required.
+Forwarding rules are configured on IRAN. KHAREJ runs GRE and the final destination services. Status, diagnostics, port management, restart, repair, and network optimization are available through numbered menus.
 
 ## ارتباط / Contact
 
 [Instagram @rizay_041](https://www.instagram.com/rizay_041/) · [GitHub @rizay041](https://github.com/rizay041)
 
-Made with care by RIZAY. License: [MIT](LICENSE)
+Numbered setup flow inspired by [Gost-ip6](https://github.com/masoudgb/Gost-ip6), implemented independently for RIZAY. License: [MIT](LICENSE).

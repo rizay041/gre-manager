@@ -16,8 +16,9 @@ jobs:
         run: test "${GITHUB_REF_NAME#v}" = "$(cat VERSION)"
       - name: Validate scripts
         run: |
-          bash -n gre-manager install.sh quick-install.sh uninstall.sh tests/test_core.sh
+          bash -n gre-manager install.sh quick-install.sh uninstall.sh tests/test_core.sh tests/test_wizard.sh
           bash tests/test_core.sh
+          bash tests/test_wizard.sh
       - name: Build release archive
         run: |
           install -d dist/gre-manager-linux

@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 readonly RELEASE_BASE="https://github.com/rizay041/gre-manager/releases/latest/download"
-readonly INSTALLER_VERSION="5.0.1"
+readonly INSTALLER_VERSION="5.1.0"
 
 border='\033[38;5;27m'
 blue='\033[1;94m'
@@ -43,12 +43,14 @@ curl -fL "$RELEASE_BASE/gre-manager-linux.tar.gz.sha256" -o gre-manager-linux.ta
 sha256sum -c gre-manager-linux.tar.gz.sha256
 tar -xzf gre-manager-linux.tar.gz
 cd gre-manager-linux
-./install.sh
+./install.sh </dev/null
 
 echo
-echo "Install completed. Starting the IRAN/KHAREJ graphical wizard..."
-if [[ -r /dev/tty ]]; then
-  /usr/local/bin/gre-manager wizard </dev/tty
+echo "Install completed. Opening the numbered IRAN/KHAREJ panel..."
+if ( : </dev/tty ) 2>/dev/null; then
+  /usr/local/bin/gre-manager menu </dev/tty
+elif [[ -t 0 ]]; then
+  /usr/local/bin/gre-manager menu
 else
-  echo "Start setup with: sudo gre-manager wizard"
+  echo "Open the step-by-step panel with: sudo gre-manager"
 fi

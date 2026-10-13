@@ -46,4 +46,4 @@ systemctl daemon-reload
 systemctl enable gre-manager.service >/dev/null
 
 echo "RIZAY Tunnel Manager installed (GRE + GOST ready)."
-echo "Next: sudo gre-manager wizard"
+echo "Open the numbered setup panel: sudo gre-manager"
