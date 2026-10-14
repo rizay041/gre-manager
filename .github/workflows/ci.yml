@@ -29,3 +29,5 @@ jobs:
         uses: ludeeus/action-shellcheck@2.0.0
         with:
           scandir: .
+      - name: Real GRE, SIT IPv6 and GOST v2 TCP/UDP
+        run: sudo -E python3 tests/test_live.py

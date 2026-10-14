@@ -42,8 +42,15 @@ fi
 install -m 755 "$SOURCE" /usr/local/bin/gre-manager
 install -m 644 "$SCRIPT_DIR/gre-manager.service" /etc/systemd/system/gre-manager.service
 install -m 644 "$SCRIPT_DIR/rizay-gost.service" /etc/systemd/system/rizay-gost.service
+install -m 644 "$SCRIPT_DIR/rizay-private.service" /etc/systemd/system/rizay-private.service
+install -m 644 "$SCRIPT_DIR/rizay-private-keepalive.service" /etc/systemd/system/rizay-private-keepalive.service
+install -m 644 "$SCRIPT_DIR/rizay-private-keepalive.timer" /etc/systemd/system/rizay-private-keepalive.timer
 systemctl daemon-reload
 systemctl enable gre-manager.service >/dev/null
+if [[ -r /etc/gre-manager/config.conf && -s /etc/gre-manager/gost-rules.conf ]]; then
+  echo "Upgrading saved GOST rules to verified GOST v2.12.0..."
+  /usr/local/bin/gre-manager sync-gost
+fi
 
-echo "RIZAY Tunnel Manager installed (GRE + GOST ready)."
+echo "RIZAY Tunnel Manager installed (GRE + PRIVATE IPv6 + GOST v2 ready)."
 echo "Open the numbered setup panel: sudo gre-manager"

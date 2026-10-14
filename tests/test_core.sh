@@ -66,6 +66,7 @@ check "accept GOST mode" valid_mode "gost"
 check "reject unknown mode" is_not_valid_mode "wireguard"
 check "accept public GOST path" valid_transport "public"
 check "accept GRE GOST path" valid_transport "gre"
+check "accept PRIVATE IPv6 GOST path" valid_transport "private"
 check "reject unsafe GOST path" is_not_valid_transport 'public;id'
 
 export ROLE="iran"
@@ -78,6 +79,8 @@ check "IRAN local endpoint" is_equal "$LOCAL_IP" "$IRAN_IP"
 check "IRAN remote endpoint" is_equal "$REMOTE_IP" "$KHAREJ_IP"
 check "IRAN GRE address" is_equal "$GRE_LOCAL" "10.77.0.1"
 check "IRAN GRE peer" is_equal "$GRE_REMOTE" "10.77.0.2"
+check "IRAN matches reference private IPv6" is_equal "$PRIVATE_LOCAL" "fd1d:fc98:b73e:b481::2"
+check "IRAN private IPv6 peer" is_equal "$PRIVATE_REMOTE" "fd1d:fc98:b73e:b481::1"
 
 export ROLE="kharej"
 validate_config
@@ -85,6 +88,9 @@ check "KHAREJ local endpoint" is_equal "$LOCAL_IP" "$KHAREJ_IP"
 check "KHAREJ remote endpoint" is_equal "$REMOTE_IP" "$IRAN_IP"
 check "KHAREJ GRE address" is_equal "$GRE_LOCAL" "10.77.0.2"
 check "KHAREJ GRE peer" is_equal "$GRE_REMOTE" "10.77.0.1"
+check "KHAREJ matches reference private IPv6" is_equal "$PRIVATE_LOCAL" "fd1d:fc98:b73e:b481::1"
+check "KHAREJ private IPv6 peer" is_equal "$PRIVATE_REMOTE" "fd1d:fc98:b73e:b481::2"
+check "last private IPv6 pair has valid subnet" is_equal "$(private_address kharej 15)" "fd1d:fc98:b73e:b48f::1"
 
 printf '1..%d\n' "$tests"
 (( failures == 0 ))

@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly VERSION="5.1.0"
+readonly VERSION="6.0.0"
 readonly CONFIG_DIR="${GRE_MANAGER_CONFIG_DIR:-/etc/gre-manager}"
 readonly CONFIG_FILE="$CONFIG_DIR/config.conf"
 readonly RULES_FILE="$CONFIG_DIR/rules.conf"
 readonly GOST_RULES_FILE="$CONFIG_DIR/gost-rules.conf"
-readonly GOST_CONFIG_FILE="$CONFIG_DIR/gost.yaml"
-readonly GOST_BIN="/usr/local/lib/gre-manager/gost"
+readonly GOST_CONFIG_FILE="$CONFIG_DIR/gost.json"
+readonly OLD_GOST_CONFIG_FILE="$CONFIG_DIR/gost.yaml"
+readonly GOST_BIN="${GRE_MANAGER_GOST_BIN:-/usr/local/lib/gre-manager/gost}"
 readonly GOST_SERVICE="rizay-gost.service"
-readonly GOST_VERSION="3.3.0"
+readonly GOST_VERSION="2.12.0"
+readonly PRIVATE_IFACE="rizay-private"
+readonly PRIVATE_SERVICE="rizay-private.service"
+readonly PRIVATE_TIMER="rizay-private-keepalive.timer"
+readonly PRIVATE_RELAY_PORT="6080"
 readonly OPTIMIZE_FILE="/etc/sysctl.d/99-rizay-tunnel.conf"
 readonly IFACE="gre-manager"
 readonly NAT_CHAIN="GRE_MANAGER_NAT"
@@ -26,6 +31,10 @@ GRE_LOCAL=""
 GRE_REMOTE=""
 GRE_PREFIX="30"
 MTU="1400"
+PRIVATE_ENABLED="no"
+PRIVATE_COUNT="1"
+PRIVATE_LOCAL=""
+PRIVATE_REMOTE=""
 PUBLIC_IFACE=""
 PING_LOSS="100"
 PING_MIN="-"
@@ -129,7 +138,8 @@ valid_port() { [[ $1 =~ ^[0-9]{1,5}$ ]] && (( 10#$1 >= 1 && 10#$1 <= 65535 )); }
 valid_mtu() { [[ $1 =~ ^[0-9]+$ ]] && (( 10#$1 >= 576 && 10#$1 <= 9000 )); }
 valid_protocol() { [[ $1 == tcp || $1 == udp ]]; }
 valid_mode() { [[ $1 == hybrid || $1 == gre || $1 == gost ]]; }
-valid_transport() { [[ $1 == public || $1 == gre ]]; }
+valid_transport() { [[ $1 == public || $1 == gre || $1 == private ]]; }
+valid_private_count() { [[ $1 =~ ^[0-9]{1,2}$ ]] && (( 10#$1 >= 1 && 10#$1 <= 15 )); }
 valid_samples() { [[ $1 =~ ^[0-9]+$ ]] && (( 10#$1 >= 5 && 10#$1 <= 200 )); }
 
 parse_port_list() {
@@ -199,6 +209,17 @@ derive_endpoints() {
       ;;
     *) die "invalid server role; run: sudo gre-manager wizard" ;;
   esac
+  PRIVATE_LOCAL=$(private_address "$ROLE" 1)
+  if [[ $ROLE == iran ]]; then PRIVATE_REMOTE=$(private_address kharej 1);
+  else PRIVATE_REMOTE=$(private_address iran 1); fi
+}
+
+private_address() {
+  local role=$1 index=${2:-1} suffix host
+  valid_private_count "$index" || die "private IPv6 pair count must be 1-15"
+  case "$role" in iran) host=2 ;; kharej) host=1 ;; *) die "invalid private IPv6 role" ;; esac
+  printf -v suffix '%x' "$((10#$index))"
+  printf 'fd1d:fc98:b73e:b48%s::%s' "$suffix" "$host"
 }
 
 validate_config() {
@@ -208,12 +229,16 @@ validate_config() {
   valid_ipv4 "$KHAREJ_IP" || die "invalid KHAREJ public IPv4 address"
   [[ $IRAN_IP != "$KHAREJ_IP" ]] || die "IRAN and KHAREJ IPs must be different"
   valid_mtu "$MTU" || die "MTU must be between 576 and 9000"
+  [[ $PRIVATE_ENABLED == yes || $PRIVATE_ENABLED == no ]] || die "private IPv6 must be yes or no"
+  valid_private_count "$PRIVATE_COUNT" || die "private IPv6 pair count must be 1-15"
   derive_endpoints
 }
 
 load_config() {
   [[ -r $CONFIG_FILE ]] || return 1
   local key value
+  # Older releases have no private IPv6 fields.
+  PRIVATE_ENABLED="no"; PRIVATE_COUNT="1"
   while IFS='=' read -r key value; do
     case "$key" in
       ROLE) ROLE=$value ;;
@@ -221,6 +246,8 @@ load_config() {
       IRAN_IP) IRAN_IP=$value ;;
       KHAREJ_IP) KHAREJ_IP=$value ;;
       MTU) MTU=$value ;;
+      PRIVATE_ENABLED) PRIVATE_ENABLED=$value ;;
+      PRIVATE_COUNT) PRIVATE_COUNT=$value ;;
     esac
   done < "$CONFIG_FILE"
   validate_config
@@ -234,8 +261,8 @@ save_config() {
   local tmp
   tmp=$(mktemp "$CONFIG_DIR/config.XXXXXX")
   chmod 600 "$tmp"
-  printf 'ROLE=%s\nMODE=%s\nIRAN_IP=%s\nKHAREJ_IP=%s\nMTU=%s\n' \
-    "$ROLE" "$MODE" "$IRAN_IP" "$KHAREJ_IP" "$MTU" > "$tmp"
+  printf 'ROLE=%s\nMODE=%s\nIRAN_IP=%s\nKHAREJ_IP=%s\nMTU=%s\nPRIVATE_ENABLED=%s\nPRIVATE_COUNT=%s\n' \
+    "$ROLE" "$MODE" "$IRAN_IP" "$KHAREJ_IP" "$MTU" "$PRIVATE_ENABLED" "$PRIVATE_COUNT" > "$tmp"
   mv -f "$tmp" "$CONFIG_FILE"
 }
 
@@ -318,16 +345,16 @@ ui_protocol() {
 
 ui_engine() {
   local choice
-  choice=$(ui_menu "RIZAY - Forwarding method" "GRE is created between both servers. How should the ports be forwarded?" \
-    1 "GOST via KHAREJ public IP (recommended)" \
-    2 "GOST inside GRE" \
-    3 "GRE with iptables" 0 "Cancel") || return 1
-  case "$choice" in 1) printf 'gost-public' ;; 2) printf 'gost-gre' ;; 3) printf 'gre' ;; *) return 1 ;; esac
+  choice=$(ui_menu "RIZAY - Forwarding method" "For a simple setup, choose 1. Private IPv6 addresses are created automatically." \
+    1 "GOST v2 + PRIVATE IPv6 (recommended)" \
+    2 "GOST v2 inside GRE" 3 "GRE with iptables" \
+    4 "GOST v2 via public IPv4" 0 "Cancel") || return 1
+  case "$choice" in 1) printf 'gost-private' ;; 2) printf 'gost-gre' ;; 3) printf 'gre' ;; 4) printf 'gost-public' ;; *) return 1 ;; esac
 }
 
 wizard() {
   require_root wizard
-  local selected_role=${1:-} role_choice ports="" protocol="tcp" engine="gost-public" summary
+  local selected_role=${1:-} role_choice ports="" protocol="tcp" engine="gost-private" summary next_step
   if [[ -r $CONFIG_FILE ]]; then load_config; fi
   clear 2>/dev/null || true
   banner
@@ -340,6 +367,7 @@ wizard() {
   [[ $selected_role == iran || $selected_role == kharej ]] || die "server role must be iran or kharej"
   ROLE=$selected_role
   MODE="hybrid"
+  PRIVATE_ENABLED="yes"
   while true; do
     IRAN_IP=$(ui_input "RIZAY - Step 2: IRAN IP" "Enter the public IPv4 of IRAN" "$IRAN_IP") || return 0
     valid_ipv4 "$IRAN_IP" && break
@@ -363,6 +391,8 @@ wizard() {
 IRAN IP: $IRAN_IP
 KHAREJ IP: $KHAREJ_IP
 GRE: $GRE_LOCAL -> $GRE_REMOTE
+PRIVATE IPv6: $PRIVATE_LOCAL -> $PRIVATE_REMOTE
+GOST version: $GOST_VERSION
 MTU: $MTU"
   if [[ $ROLE == iran ]]; then
     summary+="
@@ -377,9 +407,13 @@ Forwarding ports are selected on IRAN."
 Existing rules on selected protocol/port pairs will be updated; other ports are kept."
   ui_confirm "RIZAY - Final step: Confirm installation" "$summary" || { info "Setup cancelled. No settings were changed."; return 0; }
   apply_setup "$engine" "$protocol" "$ports"
-  ui_message "RIZAY - Installation completed" "${ROLE^^} is configured. GRE is running.
+  if [[ $ROLE == kharej ]]; then next_step="Next: run the same installer on IRAN and choose option 1.";
+  else next_step="If KHAREJ is not configured yet, run the installer there and choose option 2."; fi
+  ui_message "RIZAY - Installation completed" "${ROLE^^} is configured. GRE and PRIVATE IPv6 are running.
 ${ports:+All selected ports were saved and activated: $ports}
-Use the numbered panel to manage ports and check status."
+$next_step
+Private IPv6 needs IP Protocol 41 between the two servers.
+Use option 5 to check whether the other server is reachable."
 }
 
 save_port_batch() {
@@ -387,7 +421,7 @@ save_port_batch() {
   local file other_file pending tmp other_tmp proto i
   [[ $ROLE == iran ]] || die "forwarding ports are configured on IRAN"
   [[ $engine == gre || $engine == gost ]] || die "unknown forwarding engine"
-  valid_transport "$transport" || die "path must be public or gre"
+  valid_transport "$transport" || die "path must be public, gre or private"
   prepare_port_batch "$protocol" "$sources" "$destinations" || die "$BATCH_ERROR"
   acquire_lock
   install -d -m 700 "$CONFIG_DIR"
@@ -422,12 +456,12 @@ apply_setup() (
   local engine=$1 protocol=$2 ports=$3 backup_dir
   if [[ $ROLE == iran ]]; then
     prepare_port_batch "$protocol" "$ports" "$ports" || die "$BATCH_ERROR"
-    if [[ $engine == gost-* ]]; then install_gost_binary; fi
   fi
+  if [[ $ROLE == kharej || $engine == gost-* ]]; then install_gost_binary; fi
   acquire_lock
   install -d -m 700 "$CONFIG_DIR/backup"
   backup_dir=$(mktemp -d "$CONFIG_DIR/backup/setup.XXXXXX")
-  for file in "$CONFIG_FILE" "$RULES_FILE" "$GOST_RULES_FILE" "$GOST_CONFIG_FILE"; do
+  for file in "$CONFIG_FILE" "$RULES_FILE" "$GOST_RULES_FILE" "$GOST_CONFIG_FILE" "$OLD_GOST_CONFIG_FILE"; do
     [[ ! -f $file ]] || cp -p -- "$file" "$backup_dir/"
   done
   save_config
@@ -435,6 +469,7 @@ apply_setup() (
     case "$engine" in
       gost-public) save_port_batch gost "$protocol" "$ports" "$ports" public ;;
       gost-gre) save_port_batch gost "$protocol" "$ports" "$ports" gre ;;
+      gost-private) save_port_batch gost "$protocol" "$ports" "$ports" private ;;
       gre) save_port_batch gre "$protocol" "$ports" "$ports" ;;
       *) die "unknown forwarding method" ;;
     esac
@@ -444,12 +479,8 @@ apply_setup() (
   if [[ $ROLE == iran ]]; then systemctl stop "$GOST_SERVICE" >/dev/null 2>&1 || true; fi
   systemctl enable gre-manager.service >/dev/null
   systemctl restart gre-manager.service
-  if [[ $ROLE == iran ]]; then
-    sync_gost
-  else
-    # The destination does not run a forwarding listener.
-    systemctl disable --now "$GOST_SERVICE" >/dev/null 2>&1 || true
-  fi
+  sync_private_service
+  sync_gost
   release_lock
   info "Setup applied. Previous settings saved in: $backup_dir"
 )
@@ -467,6 +498,7 @@ add_ports_wizard() {
   [[ -n $engine ]] || engine=$(ui_engine) || return 0
   [[ $engine != gost-public ]] || transport="public"
   [[ $engine != gost-gre ]] || transport="gre"
+  [[ $engine != gost-private ]] || transport="private"
   prepare_port_batch "$protocol" "$sources" "$destinations" || { ui_message "RIZAY - Ports" "$BATCH_ERROR"; return 0; }
   ui_confirm "RIZAY - Confirm ports" "IRAN: $sources
 KHAREJ: $destinations
@@ -477,6 +509,7 @@ Existing rules on these protocol/port pairs will be updated; other ports are kep
     set -Eeuo pipefail
     if [[ $engine == gost-* ]]; then
       install_gost_binary
+      if [[ $transport == private ]]; then enable_private_config; fi
       save_config hybrid
       save_port_batch gost "$protocol" "$sources" "$destinations" "$transport"
     else
@@ -488,6 +521,7 @@ Existing rules on these protocol/port pairs will be updated; other ports are kep
     systemctl stop "$GOST_SERVICE" >/dev/null 2>&1 || true
     systemctl enable gre-manager.service >/dev/null
     systemctl restart gre-manager.service
+    sync_private_service
     sync_gost
     release_lock
   )
@@ -495,7 +529,7 @@ Existing rules on these protocol/port pairs will be updated; other ports are kep
 }
 
 detect_public_iface() {
-  PUBLIC_IFACE=$(ip route show default 2>/dev/null | awk 'NR == 1 { print $5 }')
+  PUBLIC_IFACE=$(ip -4 route get "$REMOTE_IP" 2>/dev/null | awk '{ for (i=1; i<NF; i++) if ($i == "dev") { print $(i+1); exit } }')
   [[ -n $PUBLIC_IFACE ]] || die "could not detect the public network interface"
 }
 
@@ -579,18 +613,105 @@ stop_tunnel() {
   info "GRE tunnel stopped."
 }
 
+start_private() {
+  require_root start-private
+  for command_name in ip modprobe sysctl; do require_command "$command_name"; done
+  load_config || die "configure IRAN or KHAREJ first"
+  [[ $PRIVATE_ENABLED == yes ]] || { info "PRIVATE IPv6 is not enabled in this profile."; return 0; }
+  acquire_lock
+  modprobe sit
+  sysctl -q -w net.ipv6.conf.all.disable_ipv6=0
+  ip tunnel del "$PRIVATE_IFACE" 2>/dev/null || true
+  ip tunnel add "$PRIVATE_IFACE" mode sit remote "$REMOTE_IP" local "$LOCAL_IP" ttl 255
+  ip link set dev "$PRIVATE_IFACE" mtu 1400 up
+  local i address peer peer_role
+  if [[ $ROLE == iran ]]; then peer_role=kharej; else peer_role=iran; fi
+  for ((i=1; i<=10#$PRIVATE_COUNT; i++)); do
+    address=$(private_address "$ROLE" "$i")
+    peer=$(private_address "$peer_role" "$i")
+    ip -6 address add "$address/64" dev "$PRIVATE_IFACE" nodad
+    ip -6 route replace "$peer/128" dev "$PRIVATE_IFACE"
+  done
+  info "PRIVATE IPv6 started: $PRIVATE_LOCAL -> $PRIVATE_REMOTE (SIT / Protocol 41)"
+}
+
+stop_private() {
+  require_root stop-private
+  acquire_lock
+  ip tunnel del "$PRIVATE_IFACE" 2>/dev/null || true
+  info "RIZAY PRIVATE IPv6 stopped."
+}
+
+sync_private_service() {
+  local action=${1:-restart}
+  [[ $action == restart || $action == start ]] || die "invalid private IPv6 service action"
+  load_config || die "configure IRAN or KHAREJ first"
+  release_lock
+  if [[ $PRIVATE_ENABLED == yes ]]; then
+    systemctl enable "$PRIVATE_SERVICE" >/dev/null
+    systemctl "$action" "$PRIVATE_SERVICE"
+    systemctl enable --now "$PRIVATE_TIMER" >/dev/null
+  else
+    systemctl disable --now "$PRIVATE_TIMER" "$PRIVATE_SERVICE" >/dev/null 2>&1 || true
+  fi
+}
+
+private_keepalive() {
+  require_root private-keepalive
+  load_config || return 0
+  [[ $PRIVATE_ENABLED == yes ]] || return 0
+  require_command ping
+  if LC_ALL=C ping -6 -n -q -c 1 -W 2 "$PRIVATE_REMOTE" >/dev/null 2>&1; then
+    info "PRIVATE IPv6 peer replied: $PRIVATE_REMOTE"
+  else
+    info "PRIVATE IPv6 peer did not reply. Check setup on BOTH servers and IP Protocol 41."
+  fi
+}
+
+private_menu() {
+  require_root private
+  load_config || die "configure IRAN or KHAREJ first"
+  local choice count i
+  while true; do
+    choice=$(ui_menu "RIZAY - PRIVATE IPv6" "Addresses are automatic. Use the same pair count on IRAN and KHAREJ." \
+      1 "Enable / repair PRIVATE IPv6" 2 "List private IPv6 addresses" \
+      3 "Change the number of address pairs (advanced)" \
+      4 "Test the private IPv6 peer" 0 "Back") || return 0
+    case "$choice" in
+      1) (enable_private_config; release_lock; sync_private_service) ;;
+      2) for ((i=1; i<=10#$PRIVATE_COUNT; i++)); do
+           printf 'Pair %d | IRAN %s | KHAREJ %s\n' "$i" "$(private_address iran "$i")" "$(private_address kharej "$i")"
+         done ;;
+      3) count=$(ui_input "RIZAY - Private IPv6 pairs" "How many pairs? 1 is enough for normal forwarding; maximum 15" "$PRIVATE_COUNT") || continue
+         if valid_private_count "$count"; then
+           (save_private_count "$count"; release_lock; sync_private_service)
+         else ui_message "RIZAY - Private IPv6" "Enter a number between 1 and 15."; fi ;;
+      4) private_keepalive ;;
+      0) return 0 ;;
+    esac
+    pause_menu
+  done
+}
+
+enable_private_config() { PRIVATE_ENABLED=yes; save_config; }
+save_private_count() { PRIVATE_COUNT=$1; PRIVATE_ENABLED=yes; save_config; }
+
 start_stack() {
   require_root start
   load_config || die "not configured; run: sudo gre-manager wizard"
   if [[ $MODE != gost ]]; then start_tunnel; else info "GRE is disabled in GOST mode."; fi
-  if [[ $ROLE == iran && $MODE != gre && -s $GOST_RULES_FILE ]]; then sync_gost; fi
+  sync_private_service
+  if [[ $ROLE == kharej && $PRIVATE_ENABLED == yes || $ROLE == iran && $MODE != gre && -s $GOST_RULES_FILE ]]; then sync_gost; fi
 }
 
 stop_stack() {
   require_root stop
   load_config || true
+  release_lock
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl stop "$GOST_SERVICE" "$PRIVATE_TIMER" "$PRIVATE_SERVICE" >/dev/null 2>&1 || true
+  fi
   if [[ $MODE != gost ]]; then stop_tunnel; fi
-  if command -v systemctl >/dev/null 2>&1; then systemctl stop "$GOST_SERVICE" >/dev/null 2>&1 || true; fi
   info "RIZAY tunnel stack stopped."
 }
 
@@ -598,7 +719,8 @@ restart_stack() {
   require_root restart
   load_config || die "not configured; run: sudo gre-manager wizard"
   if [[ $MODE != gost ]]; then stop_tunnel; start_tunnel; fi
-  if [[ $ROLE == iran && $MODE != gre && -s $GOST_RULES_FILE ]]; then sync_gost; fi
+  sync_private_service
+  if [[ $ROLE == kharej && $PRIVATE_ENABLED == yes || $ROLE == iran && $MODE != gre && -s $GOST_RULES_FILE ]]; then sync_gost; fi
   info "RIZAY tunnel stack restarted."
 }
 
@@ -699,22 +821,30 @@ install_gost_binary() {
   for command_name in curl tar sha256sum awk; do require_command "$command_name"; done
   arch=$(gost_arch)
   asset="gost_${GOST_VERSION}_linux_${arch}.tar.gz"
-  base="https://github.com/go-gost/gost/releases/download/v${GOST_VERSION}"
+  base="https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}"
   work_dir=$(mktemp -d /tmp/rizay-gost.XXXXXX)
   (
     set -Eeuo pipefail
     trap 'rm -rf -- "$work_dir"' EXIT
     info "Downloading official GOST v$GOST_VERSION ($arch)..."
-    curl --proto '=https' --tlsv1.2 -fL "$base/$asset" -o "$work_dir/$asset"
-    curl --proto '=https' --tlsv1.2 -fL "$base/checksums.txt" -o "$work_dir/checksums.txt"
+    curl -4 --proto '=https' --tlsv1.2 --connect-timeout 15 --retry 3 -fL "$base/$asset" -o "$work_dir/$asset"
+    curl -4 --proto '=https' --tlsv1.2 --connect-timeout 15 --retry 3 -fL "$base/checksums.txt" -o "$work_dir/checksums.txt"
     awk -v file="$asset" '$2 == file || $2 == "*" file { print $1 "  " file; found=1 } END { exit !found }' \
       "$work_dir/checksums.txt" > "$work_dir/selected.sha256"
     cd "$work_dir"
     sha256sum -c selected.sha256
-    install -d -m 755 "$work_dir/unpack" /usr/local/lib/gre-manager
+    install -d -m 755 "$work_dir/unpack" "$(dirname "$GOST_BIN")"
     tar -xzf "$asset" -C "$work_dir/unpack"
     [[ -f $work_dir/unpack/gost ]] || die "official GOST archive did not contain the expected binary"
-    install -m 755 "$work_dir/unpack/gost" "$GOST_BIN"
+    local candidate_version
+    candidate_version=$("$work_dir/unpack/gost" -V)
+    [[ $candidate_version == "gost $GOST_VERSION "* ]] || die "downloaded GOST version did not match $GOST_VERSION"
+    if [[ -f $GOST_BIN ]]; then
+      install -d -m 700 "$CONFIG_DIR/backup"
+      cp -p -- "$GOST_BIN" "$CONFIG_DIR/backup/gost.$(date +%Y%m%d%H%M%S)"
+    fi
+    install -m 755 "$work_dir/unpack/gost" "$GOST_BIN.next"
+    mv -f -- "$GOST_BIN.next" "$GOST_BIN"
   )
   "$GOST_BIN" -V
 }
@@ -724,6 +854,8 @@ gost_target() {
   case "$transport" in
     public) printf '%s' "$KHAREJ_IP" ;;
     gre) printf '%s' "$GRE_REMOTE" ;;
+    # The private relay resolves the final service on KHAREJ's IPv4 loopback.
+    private) printf '127.0.0.1' ;;
     *) die "invalid GOST transport: $transport" ;;
   esac
 }
@@ -733,7 +865,12 @@ write_gost_config() {
   install -d -m 700 "$CONFIG_DIR"
   tmp=$(mktemp "$CONFIG_DIR/gost.XXXXXX")
   chmod 600 "$tmp"
-  printf 'services:\n' > "$tmp"
+  if [[ $ROLE == kharej ]]; then
+    printf '{"Debug": false, "ServeNodes": ["relay://[%s]:%s"]}\n' "$PRIVATE_LOCAL" "$PRIVATE_RELAY_PORT" > "$tmp"
+    mv -f "$tmp" "$GOST_CONFIG_FILE"
+    return 0
+  fi
+  printf '{\n  "Debug": false,\n  "Routes": [\n' > "$tmp"
   while read -r protocol source_port destination_port transport extra; do
     [[ -z ${protocol:-} || $protocol == \#* ]] && continue
     [[ -z ${extra:-} ]] || die "malformed rule in $GOST_RULES_FILE"
@@ -742,40 +879,46 @@ write_gost_config() {
     valid_port "$destination_port" || die "invalid GOST KHAREJ port: $destination_port"
     valid_transport "$transport" || die "invalid GOST transport: $transport"
     target=$(gost_target "$transport")
-    cat >> "$tmp" <<EOF
-- name: rizay-${protocol}-${source_port}
-  addr: ":${source_port}"
-  handler:
-    type: ${protocol}
-  listener:
-    type: ${protocol}
-  forwarder:
-    nodes:
-    - name: kharej-${protocol}-${destination_port}
-      addr: "${target}:${destination_port}"
-EOF
+    if (( count > 0 )); then printf ',\n' >> "$tmp"; fi
+    printf '    {"ServeNodes": ["%s://0.0.0.0:%s/%s:%s"], "Retries": 3' "$protocol" "$source_port" "$target" "$destination_port" >> "$tmp"
+    if [[ $transport == private ]]; then
+      printf ', "ChainNodes": ["relay://[%s]:%s?nodelay=true"]' "$PRIVATE_REMOTE" "$PRIVATE_RELAY_PORT" >> "$tmp"
+    fi
+    printf '}' >> "$tmp"
     ((count+=1))
   done < "$GOST_RULES_FILE"
   (( count > 0 )) || { rm -f -- "$tmp"; die "no valid GOST rules to render"; }
+  printf '\n  ]\n}\n' >> "$tmp"
   mv -f "$tmp" "$GOST_CONFIG_FILE"
 }
 
 sync_gost() {
   require_root sync-gost
   load_config || die "not configured; run: sudo gre-manager wizard"
-  [[ $ROLE == iran ]] || die "GOST forwarding is managed on the IRAN server"
   acquire_lock
-  if [[ ! -s $GOST_RULES_FILE ]]; then
+  if [[ $ROLE == iran && ! -s $GOST_RULES_FILE || $ROLE == kharej && $PRIVATE_ENABLED != yes ]]; then
     rm -f -- "$GOST_CONFIG_FILE"
     if command -v systemctl >/dev/null 2>&1; then systemctl disable --now "$GOST_SERVICE" >/dev/null 2>&1 || true; fi
-    info "No GOST rules. The RIZAY GOST service is disabled."
+    info "GRE / iptables mode: GOST is not needed for these saved ports."
     return 0
   fi
   install_gost_binary
+  if [[ $ROLE == kharej ]] || awk '$4 == "private" { found=1 } END { exit !found }' "$GOST_RULES_FILE"; then
+    if [[ $PRIVATE_ENABLED != yes ]]; then enable_private_config; fi
+    release_lock
+    sync_private_service start
+    acquire_lock
+  fi
   write_gost_config
+  if [[ -f $OLD_GOST_CONFIG_FILE ]]; then
+    install -d -m 700 "$CONFIG_DIR/backup"
+    mv -- "$OLD_GOST_CONFIG_FILE" "$CONFIG_DIR/backup/gost-v3.$(date +%Y%m%d%H%M%S).yaml"
+  fi
+  release_lock
   systemctl daemon-reload
   systemctl enable "$GOST_SERVICE" >/dev/null
   if systemctl restart "$GOST_SERVICE"; then
+    if ! systemctl is-active --quiet "$GOST_SERVICE"; then die "GOST exited after startup; check GOST Logs in option 5"; fi
     info "GOST service rebuilt from saved rules."
   else
     systemctl --no-pager --full status "$GOST_SERVICE" || true
@@ -797,7 +940,7 @@ add_gost_rule() {
   valid_protocol "$protocol" || die "protocol must be tcp or udp"
   valid_port "$source_port" || die "IRAN port must be 1-65535"
   valid_port "$destination_port" || die "KHAREJ port must be 1-65535"
-  valid_transport "$transport" || die "path must be public or gre"
+  valid_transport "$transport" || die "path must be public, gre or private"
   [[ $transport != gre || $MODE != gost ]] || die "GRE path requires HYBRID or GRE mode"
   acquire_lock
   install -d -m 700 "$CONFIG_DIR"
@@ -951,7 +1094,18 @@ doctor() {
       doctor_item WARN "firewall runtime" "saved rules exist but runtime chains are missing"
     fi
   fi
-  if [[ $ROLE == iran && $MODE != gre ]]; then
+  if [[ $PRIVATE_ENABLED == yes ]]; then
+    if modprobe -n sit >/dev/null 2>&1; then doctor_item PASS "SIT kernel module" "available (IP Protocol 41)";
+    else doctor_item FAIL "SIT kernel module" "unavailable"; fi
+    if ip -6 address show dev "$PRIVATE_IFACE" 2>/dev/null | grep -Fq "$PRIVATE_LOCAL"; then
+      doctor_item PASS "PRIVATE IPv6" "$PRIVATE_LOCAL"
+    else doctor_item FAIL "PRIVATE IPv6" "missing; use option 10 / repair"; fi
+    if systemctl is-active --quiet "$PRIVATE_SERVICE" 2>/dev/null; then doctor_item PASS "Private IPv6 service" "active";
+    else doctor_item WARN "Private IPv6 service" "not active"; fi
+    if systemctl is-active --quiet "$PRIVATE_TIMER" 2>/dev/null; then doctor_item PASS "IPv6 keepalive timer" "active";
+    else doctor_item WARN "IPv6 keepalive timer" "not active"; fi
+  fi
+  if [[ $ROLE == iran && $MODE != gre || $ROLE == kharej && $PRIVATE_ENABLED == yes ]]; then
     if [[ -x $GOST_BIN ]]; then
       gost_version=$($GOST_BIN -V 2>&1 || true)
       if [[ $gost_version == *"$GOST_VERSION"* ]]; then doctor_item PASS "GOST binary" "$gost_version"; else doctor_item WARN "GOST binary" "unexpected version: ${gost_version:-unknown}"; fi
@@ -960,7 +1114,11 @@ doctor() {
     else
       doctor_item WARN "GOST binary" "installed automatically with the first rule"
     fi
-    if [[ -s $GOST_RULES_FILE ]]; then
+    if [[ $ROLE == kharej ]]; then
+      doctor_item PASS "GOST server role" "private IPv6 relay -> IPv4 final services"
+      if systemctl is-active --quiet "$GOST_SERVICE" 2>/dev/null; then doctor_item PASS "GOST relay service" "active";
+      else doctor_item FAIL "GOST relay service" "not active"; fi
+    elif [[ -s $GOST_RULES_FILE ]]; then
       while read -r protocol source_port destination_port transport extra; do
         [[ -z ${protocol:-} || $protocol == \#* ]] && continue
         if [[ -n ${extra:-} ]] || ! valid_protocol "$protocol" || ! valid_port "$source_port" || \
@@ -976,7 +1134,7 @@ doctor() {
     doctor_item WARN "firewalld" "active; reloads may remove direct iptables rules"
   fi
   if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then
-    doctor_item WARN "UFW" "active; verify Protocol 47 and FORWARD policy"
+    doctor_item WARN "UFW" "active; verify Protocol 41 (SIT), 47 (GRE), ICMPv6 and FORWARD policy"
   fi
   printf '\nSummary: %d PASS, %d WARN, %d FAIL\n' "$DOCTOR_PASS" "$DOCTOR_WARN" "$DOCTOR_FAIL"
   (( DOCTOR_FAIL == 0 ))
@@ -1006,6 +1164,7 @@ health() {
   local samples=${1:-50} service_port=${2:-} public_loss public_min public_avg public_max public_jitter
   local gre_loss=100 gre_min="-" gre_avg="-" gre_max="-" gre_jitter="-" tunnel_up=0 forward_on=0 score label
   local tunnel_text="DISABLED" forward_text="OFF" tcp_text="NOT TESTED" gost_text="NOT CONFIGURED" probe_target
+  local private_loss=100 private_min="-" private_avg="-" private_max="-" private_jitter="-" private_text="DISABLED" path_loss
   valid_samples "$samples" || die "sample count must be between 5 and 200"
   [[ -z $service_port ]] || valid_port "$service_port" || die "service port must be 1-65535"
   banner
@@ -1018,16 +1177,27 @@ health() {
     ping_stats "$GRE_REMOTE" "$samples"
     gre_loss=${PING_LOSS%.*}; gre_min=$PING_MIN; gre_avg=$PING_AVG; gre_max=$PING_MAX; gre_jitter=$PING_MDEV
   fi
+  if [[ $PRIVATE_ENABLED == yes ]]; then
+    private_text="DOWN"
+    if ip link show "$PRIVATE_IFACE" >/dev/null 2>&1; then private_text="UP"; fi
+    ping_stats "$PRIVATE_REMOTE" "$samples"
+    private_loss=${PING_LOSS%.*}; private_min=$PING_MIN; private_avg=$PING_AVG; private_max=$PING_MAX; private_jitter=$PING_MDEV
+  fi
   if [[ $(sysctl -n net.ipv4.ip_forward 2>/dev/null || true) == 1 ]]; then forward_on=1; forward_text="ON"; fi
   if [[ $ROLE == iran && -s $GOST_RULES_FILE ]]; then
     if systemctl is-active --quiet "$GOST_SERVICE" 2>/dev/null; then gost_text="ACTIVE"; else gost_text="DOWN"; fi
-  elif [[ $ROLE == kharej ]]; then
-    gost_text="NOT NEEDED ON KHAREJ"
+  elif [[ $ROLE == kharej && $PRIVATE_ENABLED == yes ]]; then
+    if systemctl is-active --quiet "$GOST_SERVICE" 2>/dev/null; then gost_text="PRIVATE RELAY ACTIVE"; else gost_text="PRIVATE RELAY DOWN"; fi
   fi
   if [[ -n $service_port ]]; then
     require_command timeout
     probe_target=$GRE_REMOTE
     [[ $MODE != gost ]] || probe_target=$REMOTE_IP
+    if [[ $ROLE == iran && -s $GOST_RULES_FILE ]]; then
+      local transport
+      transport=$(awk -v port="$service_port" '$1 == "tcp" && $3 == port { print $4; exit }' "$GOST_RULES_FILE")
+      case "$transport" in private|public) probe_target=$KHAREJ_IP ;; esac
+    fi
     # The variables below are positional parameters inside the child Bash process.
     # shellcheck disable=SC2016
     if timeout 3 bash -c 'exec 3<>/dev/tcp/$1/$2' _ "$probe_target" "$service_port" 2>/dev/null; then
@@ -1037,13 +1207,15 @@ health() {
     fi
   fi
 
+  path_loss=$gre_loss
+  if [[ $ROLE == iran && -s $GOST_RULES_FILE ]] && awk '$4 == "private" { found=1 } END { exit !found }' "$GOST_RULES_FILE"; then path_loss=$private_loss; fi
   if [[ $tcp_text == OPEN* ]]; then
     score=100
   elif [[ $MODE == gost ]]; then
     score=$((100 - public_loss))
     [[ $ROLE != iran || $gost_text == ACTIVE || ! -s $GOST_RULES_FILE ]] || score=$((score - 35))
-  elif (( gre_loss < 100 )); then
-    score=$((100 - (gre_loss * 80 / 100)))
+  elif (( path_loss < 100 )); then
+    score=$((100 - (path_loss * 80 / 100)))
   else
     score=$((50 - (public_loss * 30 / 100)))
     (( tunnel_up == 1 )) || score=$((score - 20))
@@ -1058,6 +1230,11 @@ health() {
   printf 'KHAREJ public IP      : %s\n' "$KHAREJ_IP"
   printf 'Public path loss      : %s%%  (RTT min/avg/max/jitter: %s/%s/%s/%s ms)\n' "$public_loss" "$public_min" "$public_avg" "$public_max" "$public_jitter"
   printf 'GRE path loss         : %s%%  (RTT min/avg/max/jitter: %s/%s/%s/%s ms)\n' "$gre_loss" "$gre_min" "$gre_avg" "$gre_max" "$gre_jitter"
+  if [[ $PRIVATE_ENABLED == yes ]]; then
+    printf 'PRIVATE IPv6 loss     : %s%%  (RTT min/avg/max/jitter: %s/%s/%s/%s ms)\n' "$private_loss" "$private_min" "$private_avg" "$private_max" "$private_jitter"
+    printf 'PRIVATE IPv6 peer     : %s | interface: %s\n' "$PRIVATE_REMOTE" "$private_text"
+    if (( private_loss == 100 )); then info "PRIVATE IPv6 has no replies. Configure BOTH servers; allow IP Protocol 41 and ICMPv6."; fi
+  fi
   printf 'GRE interface         : %s\n' "$tunnel_text"
   printf 'GOST service          : %s\n' "$gost_text"
   printf 'IPv4 forwarding       : %s\n' "$forward_text"
@@ -1072,21 +1249,28 @@ status() {
   require_root status
   load_config || die "not configured; run: sudo gre-manager wizard"
   local output_mode=${1:-} state="DOWN" forwarding="false" rules_count=0 gost_rules=0 gost_state="NOT_CONFIGURED"
+  local private_state="DISABLED"
+  if [[ $PRIVATE_ENABLED == yes ]]; then
+    private_state="DOWN"
+    if ip link show "$PRIVATE_IFACE" >/dev/null 2>&1; then private_state="UP"; fi
+  fi
   [[ $MODE != gost ]] || state="DISABLED"
   if ip link show "$IFACE" >/dev/null 2>&1; then state="UP"; fi
   if [[ $(sysctl -n net.ipv4.ip_forward 2>/dev/null || true) == 1 ]]; then forwarding="true"; fi
   if [[ -s $RULES_FILE ]]; then rules_count=$(awk '!/^($|#)/ { count++ } END { print count+0 }' "$RULES_FILE"); fi
   if [[ -s $GOST_RULES_FILE ]]; then gost_rules=$(awk '!/^($|#)/ { count++ } END { print count+0 }' "$GOST_RULES_FILE"); fi
-  if systemctl is-active --quiet "$GOST_SERVICE" 2>/dev/null; then gost_state="ACTIVE"; elif (( gost_rules > 0 )); then gost_state="DOWN"; fi
+  if systemctl is-active --quiet "$GOST_SERVICE" 2>/dev/null; then gost_state="ACTIVE";
+  elif (( gost_rules > 0 )) || [[ $ROLE == kharej && $PRIVATE_ENABLED == yes ]]; then gost_state="DOWN"; fi
   if [[ $output_mode == --json ]]; then
-    printf '{"version":"%s","role":"%s","mode":"%s","iran_ip":"%s","kharej_ip":"%s","gre_local":"%s","gre_remote":"%s","gre":"%s","gost":"%s","ip_forward":%s,"gre_rules":%s,"gost_rules":%s}\n' \
-      "$VERSION" "${ROLE^^}" "${MODE^^}" "$IRAN_IP" "$KHAREJ_IP" "$GRE_LOCAL" "$GRE_REMOTE" "$state" "$gost_state" "$forwarding" "$rules_count" "$gost_rules"
-    [[ $state == UP || $state == DISABLED ]] && [[ $gost_state != DOWN ]]
+    printf '{"version":"%s","role":"%s","mode":"%s","iran_ip":"%s","kharej_ip":"%s","gre_local":"%s","gre_remote":"%s","gre":"%s","gost":"%s","gost_version":"%s","private_ipv6":"%s","private_local":"%s","private_remote":"%s","ip_forward":%s,"gre_rules":%s,"gost_rules":%s}\n' \
+      "$VERSION" "${ROLE^^}" "${MODE^^}" "$IRAN_IP" "$KHAREJ_IP" "$GRE_LOCAL" "$GRE_REMOTE" "$state" "$gost_state" "$GOST_VERSION" "$private_state" "$PRIVATE_LOCAL" "$PRIVATE_REMOTE" "$forwarding" "$rules_count" "$gost_rules"
+    [[ $state == UP || $state == DISABLED ]] && [[ $gost_state != DOWN && $private_state != DOWN ]]
     return
   fi
   banner
   printf 'Role: %s | Mode: %s | IRAN: %s | KHAREJ: %s\n' "${ROLE^^}" "${MODE^^}" "$IRAN_IP" "$KHAREJ_IP"
   printf 'GRE: %s | GOST: %s | GRE rules: %s | GOST rules: %s\n' "$state" "$gost_state" "$rules_count" "$gost_rules"
+  printf 'PRIVATE IPv6: %s | Local: %s | Peer: %s | GOST version: %s\n' "$private_state" "$PRIVATE_LOCAL" "$PRIVATE_REMOTE" "$GOST_VERSION"
   if [[ $state == UP ]]; then
     ip -brief address show "$IFACE"
     printf 'IPv4 forwarding: %s\n' "${forwarding^^}"
@@ -1129,7 +1313,10 @@ restore_network_defaults() {
 }
 
 about() {
-  ui_message "RIZAY Tunnel Manager v$VERSION" "GRE + GOST tunnel management for IRAN and KHAREJ.\n\nGOST engine: official v$GOST_VERSION\nInstagram: @rizay_041\nGitHub: github.com/rizay041/gre-manager"
+  ui_message "RIZAY Tunnel Manager v$VERSION" "GRE + PRIVATE IPv6 + GOST v2 for IRAN and KHAREJ.
+GOST engine: official v$GOST_VERSION
+Instagram: @rizay_041
+GitHub: github.com/rizay041/gre-manager"
 }
 
 pause_menu() {
@@ -1213,7 +1400,7 @@ menu() {
       3 "Add or change ports" 4 "Status and saved ports" \
       5 "Health Center - packet loss and Doctor" 6 "Port Manager" \
       7 "Tunnel Center - start / stop / restart" 8 "Maintenance and optimization" \
-      9 "About RIZAY / @rizay_041" 0 "Exit") || return 0
+      9 "About RIZAY / @rizay_041" 10 "PRIVATE IPv6 - status / repair / extra addresses" 0 "Exit") || return 0
     case "$choice" in
       1|2|9|0) ;;
       *) if [[ ! -r $CONFIG_FILE ]]; then
@@ -1226,8 +1413,9 @@ menu() {
       4) status || true; list_rules; list_gost_rules ;;
       5) health_menu ;; 6) port_menu ;; 7) tunnel_menu ;; 8) maintenance_menu ;;
       9) about ;; 0) return 0 ;;
+      10) private_menu ;;
     esac
-    case "$choice" in 5|6|7|8) ;; *) pause_menu ;; esac
+    case "$choice" in 5|6|7|8|10) ;; *) pause_menu ;; esac
   done
 }
 
@@ -1247,10 +1435,13 @@ Usage: gre-manager COMMAND [ARGS]
   add-rule [tcp|udp SRC DST] Forward an IRAN port to the KHAREJ server
   remove-rule [tcp|udp SRC]  Remove one forwarding rule safely
   list-rules                 List persistent forwarding rules
-  add-gost [PROTO SRC DST PATH]  Add GOST rule; PATH is public or gre
+  add-gost [PROTO SRC DST PATH]  GOST v2; PATH is private, public or gre
   remove-gost [PROTO SRC]        Remove one GOST rule
   list-gost|clear-gost|sync-gost Manage persistent GOST forwarding
-  install-gost [--force]     Install verified official GOST v3.3.0
+  install-gost [--force]     Install verified official GOST v2.12.0
+  private                    Private IPv6 status / repair / address pairs
+  start-private|stop-private Control the SIT IPv6 interface
+  private-keepalive           Ping the private IPv6 peer
   gost-logs [LINES]          Show GOST service logs
   firewall                   Show live iptables packet/byte counters
   clear-rules                Remove all forwarding rules
@@ -1267,6 +1458,8 @@ main() {
     doctor) doctor ;; health) shift; health "${1:-50}" "${2:-}" ;;
     start) start_stack ;; stop) stop_stack ;; restart) restart_stack ;;
     start-gre) start_tunnel ;; stop-gre) stop_tunnel ;;
+    start-private) start_private ;; stop-private) stop_private ;; private) private_menu ;;
+    private-keepalive) private_keepalive ;;
     repair) repair ;; status) shift; status "${1:-}" ;; add-rule) shift; add_rule "$@" ;;
     remove-rule) shift; remove_rule "$@" ;; list-rules) list_rules ;; firewall) firewall_rules ;;
     clear-rules) clear_rules ;; add-gost) shift; add_gost_rule "$@" ;;

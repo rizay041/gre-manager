@@ -22,7 +22,7 @@ tests=0
 failures=0
 
 # Only host/network mutations are mocked. Inputs, validation, saved config,
-# batch migration and the generated GOST YAML use production functions.
+# batch migration and the generated GOST v2 JSON use production functions.
 require_root() { :; }
 clear() { :; }
 banner() { :; }
@@ -30,8 +30,8 @@ acquire_lock() { LOCK_HELD=1; }
 release_lock() { LOCK_HELD=0; }
 install_gost_binary() { printf 'gost-install\n' >> "$CALLS"; }
 systemctl() {
-  if [[ ${1:-} == restart && ${2:-} == gre-manager.service && $LOCK_HELD == 1 ]]; then
-    printf 'ERROR: GRE service restarted while the configuration lock was held\n' >&2
+  if [[ ${1:-} == restart && ( ${2:-} == gre-manager.service || ${2:-} == rizay-private.service ) && $LOCK_HELD == 1 ]]; then
+    printf 'ERROR: tunnel service restarted while the configuration lock was held\n' >&2
     return 1
   fi
   printf 'systemctl %s\n' "$*" >> "$CALLS"
@@ -58,13 +58,18 @@ check() {
 equals() { [[ $1 == "$2" ]]; }
 has_lines() { [[ $(wc -l < "$1" | tr -d '[:space:]') == "$2" ]]; }
 absent() { [[ ! -e $1 ]]; }
+migrate_old_config() {
+  printf 'old v3 config\n' > "$OLD_GOST_CONFIG_FILE"
+  sync_gost >/dev/null
+  [[ ! -f $OLD_GOST_CONFIG_FILE ]] && compgen -G "$CONFIG_DIR/backup/gost-v3.*.yaml" >/dev/null
+}
 reset_state() {
   rm -f -- "$CONFIG_FILE" "$RULES_FILE" "$GOST_RULES_FILE" "$GOST_CONFIG_FILE" "$CALLS" "$OUTPUT"
-  export ROLE="" MODE=hybrid IRAN_IP="" KHAREJ_IP="" MTU=1400
+  export ROLE="" MODE=hybrid IRAN_IP="" KHAREJ_IP="" MTU=1400 PRIVATE_ENABLED=no PRIVATE_COUNT=1
 }
 
 reset_state
-wizard <<< $'1\n203.0.113.10\n198.51.100.20\n443,8443,2053\n1\n1\n1' > "$OUTPUT" 2>&1
+wizard <<< $'1\n203.0.113.10\n198.51.100.20\n443,8443,2053\n1\n4\n1' > "$OUTPUT" 2>&1
 check "IRAN menu installs three ports without commands" has_lines "$GOST_RULES_FILE" 3
 check "wizard saves IRAN profile" grep -Fxq ROLE=iran "$CONFIG_FILE"
 check "wizard keeps GRE alongside GOST" grep -Fxq MODE=hybrid "$CONFIG_FILE"
@@ -72,6 +77,8 @@ check "public GOST rule maps the same port" grep -Fxq 'tcp 8443 8443 public' "$G
 check "public GOST targets the KHAREJ IP" grep -Fq '198.51.100.20:8443' "$GOST_CONFIG_FILE"
 check "GRE is started automatically" grep -Fxq 'systemctl restart gre-manager.service' "$CALLS"
 check "GOST is started automatically" grep -Fxq 'systemctl restart rizay-gost.service' "$CALLS"
+check "PRIVATE IPv6 is started automatically" grep -Fxq 'systemctl restart rizay-private.service' "$CALLS"
+check "IPv6 keepalive is enabled automatically" grep -Fxq 'systemctl enable --now rizay-private-keepalive.timer' "$CALLS"
 check "setup releases its mutation lock" equals "$LOCK_HELD" 0
 
 reset_state
@@ -93,16 +100,16 @@ check "KHAREJ does not request or create forwarding ports" absent "$GOST_RULES_F
 check "KHAREJ starts GRE" grep -Fxq 'systemctl restart gre-manager.service' "$CALLS"
 
 reset_state
-wizard iran <<< $'203.0.113.10\n198.51.100.20\n443,8443\n1\n1\n0' > "$OUTPUT" 2>&1
+wizard iran <<< $'203.0.113.10\n198.51.100.20\n443,8443\n1\n4\n0' > "$OUTPUT" 2>&1
 check "cancel does not write configuration" absent "$CONFIG_FILE"
 check "cancel does not download GOST or start services" absent "$CALLS"
 
 reset_state
-wizard iran <<< $'203.0.113.10\n198.51.100.20\n443,,8443\n443,8443\n1\n1\n1' > "$OUTPUT" 2>&1
+wizard iran <<< $'203.0.113.10\n198.51.100.20\n443,,8443\n443,8443\n1\n4\n1' > "$OUTPUT" 2>&1
 check "invalid comma input is reported" grep -Fq 'Enter ports separated by commas' "$OUTPUT"
 check "valid retry creates both ports" has_lines "$GOST_RULES_FILE" 2
 
-add_ports_wizard <<< $'2053,2087\n\n3\n1\n1' > "$OUTPUT" 2>&1
+add_ports_wizard <<< $'2053,2087\n\n3\n4\n1' > "$OUTPUT" 2>&1
 check "Add Ports handles comma lists and keeps old rules" has_lines "$GOST_RULES_FILE" 6
 check "new UDP rule is active in saved config" grep -Fxq 'udp 2087 2087 public' "$GOST_RULES_FILE"
 
@@ -127,6 +134,16 @@ reset_state
 menu <<< $'4\n0' > "$OUTPUT" 2>&1
 check "unconfigured status returns to the menu" grep -Fq 'Setup first' "$OUTPUT"
 check "unconfigured status does not create config" absent "$CONFIG_FILE"
+
+reset_state
+wizard iran <<< $'203.0.113.10\n198.51.100.20\n2027,443\n3\n1\n1' > "$OUTPUT" 2>&1
+check "recommended setup creates TCP and UDP on private IPv6" has_lines "$GOST_RULES_FILE" 4
+check "recommended rule selects private IPv6" grep -Fxq 'tcp 2027 2027 private' "$GOST_RULES_FILE"
+check "IPv6 relay uses bracketed GOST v2 URL" grep -Fq 'relay://[fd1d:fc98:b73e:b481::1]:6080' "$GOST_CONFIG_FILE"
+check "private relay supports IPv4-only final services" grep -Fq 'tcp://0.0.0.0:2027/127.0.0.1:2027' "$GOST_CONFIG_FILE"
+check "configuration uses GOST v2 ServeNodes" grep -Fq '"ServeNodes"' "$GOST_CONFIG_FILE"
+check "PRIVATE IPv6 profile is persistent" grep -Fxq PRIVATE_ENABLED=yes "$CONFIG_FILE"
+check "old v3 YAML is backed up during migration" migrate_old_config
 
 printf '1..%d\n' "$tests"
 (( failures == 0 ))

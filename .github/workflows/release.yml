@@ -19,12 +19,13 @@ jobs:
           bash -n gre-manager install.sh quick-install.sh uninstall.sh tests/test_core.sh tests/test_wizard.sh
           bash tests/test_core.sh
           bash tests/test_wizard.sh
+          sudo -E python3 tests/test_live.py
       - name: Build release archive
         run: |
           install -d dist/gre-manager-linux
           install -d dist/gre-manager-linux/assets
           install -m 755 gre-manager install.sh quick-install.sh uninstall.sh dist/gre-manager-linux/
-          install -m 644 gre-manager.service rizay-gost.service README.md CHANGELOG.md LICENSE VERSION dist/gre-manager-linux/
+          install -m 644 gre-manager.service rizay-gost.service rizay-private.service rizay-private-keepalive.service rizay-private-keepalive.timer README.md CHANGELOG.md LICENSE VERSION dist/gre-manager-linux/
           install -m 644 assets/rizay-logo.svg dist/gre-manager-linux/assets/
           tar -C dist -czf dist/gre-manager-linux.tar.gz gre-manager-linux
           cd dist && sha256sum gre-manager-linux.tar.gz > gre-manager-linux.tar.gz.sha256

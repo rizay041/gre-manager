@@ -1,0 +1,21 @@
+[Unit]
+Description=RIZAY Private IPv6 over IPv4 (SIT)
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/etc/gre-manager/config.conf
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/gre-manager start-private
+ExecStop=/usr/local/bin/gre-manager stop-private
+TimeoutStartSec=30s
+TimeoutStopSec=20s
+UMask=0077
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

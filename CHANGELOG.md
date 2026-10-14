@@ -1,5 +1,17 @@
 # Changelog
 
+## 6.0.0 - 2026-10-14
+
+- Switch to checksum-verified official GOST v2.12.0 with native ServeNodes JSON configuration.
+- Upgrade existing GOST v3 YAML and binary automatically, retaining saved ports and backups.
+- Add automatic private IPv6 over IPv4 (SIT) with the same address scheme as Azumi67's PrivateIP script.
+- Add persistent private IPv6 systemd setup and a once-per-minute peer keepalive timer.
+- Add PRIVATE IPv6 forwarding as the recommended numbered setup choice.
+- Add an advanced private IPv6 menu supporting 1-15 address pairs without duplicate subnets.
+- Extend Health, Doctor and JSON status with private IPv6 state and loss measurement.
+- Keep IRAN/KHAREJ role selection and comma-separated port setup simple.
+- Add real Linux namespace tests for GRE, SIT and GOST v2 TCP/UDP on all three forwarding paths.
+
 ## 5.1.0 - 2026-10-13
 
 - Make the main panel numbered: 1) IRAN, 2) KHAREJ, followed by IPs and ports.

@@ -1,0 +1,10 @@
+[Unit]
+Description=RIZAY Private IPv6 keepalive every minute
+
+[Timer]
+OnBootSec=60s
+OnUnitActiveSec=60s
+Unit=rizay-private-keepalive.service
+
+[Install]
+WantedBy=timers.target

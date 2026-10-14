@@ -1,0 +1,13 @@
+[Unit]
+Description=RIZAY Private IPv6 peer keepalive
+After=network-online.target rizay-private.service
+ConditionPathExists=/etc/gre-manager/config.conf
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/gre-manager private-keepalive
+TimeoutStartSec=10s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true

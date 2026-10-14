@@ -1,15 +1,15 @@
 [Unit]
 Description=RIZAY Tunnel Manager - GOST forwarding engine
 Wants=network-online.target
-After=network-online.target gre-manager.service
-ConditionPathExists=/etc/gre-manager/gost.yaml
+After=network-online.target gre-manager.service rizay-private.service
+ConditionPathExists=/etc/gre-manager/gost.json
 
 [Service]
 Type=simple
-Environment=GOST_LOGGER_LEVEL=warn
-ExecStart=/usr/local/lib/gre-manager/gost -C /etc/gre-manager/gost.yaml
+ExecStart=/usr/local/lib/gre-manager/gost -C /etc/gre-manager/gost.json
 Restart=on-failure
 RestartSec=3s
+LimitNOFILE=65536
 TimeoutStartSec=30s
 TimeoutStopSec=20s
 UMask=0077
