@@ -673,6 +673,7 @@ private_menu() {
   load_config || die "configure IRAN or KHAREJ first"
   local choice count i
   while true; do
+    load_config
     choice=$(ui_menu "RIZAY - PRIVATE IPv6" "Addresses are automatic. Use the same pair count on IRAN and KHAREJ." \
       1 "Enable / repair PRIVATE IPv6" 2 "List private IPv6 addresses" \
       3 "Change the number of address pairs (advanced)" \
