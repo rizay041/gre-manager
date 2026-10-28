@@ -1,5 +1,10 @@
 # Changelog
 
+## 6.1.1 - 2026-10-28
+
+- Make `uninstall.sh` fall back to direct cleanup when an older installed binary has no uninstall command.
+- Document the explicit `--purge` uninstall mode in the command help.
+
 ## 6.1.0 - 2026-10-28
 
 - Add a live colored dashboard with GRE, PRIVATE IPv6, GOST and rule cards.

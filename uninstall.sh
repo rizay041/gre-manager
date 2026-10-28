@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 [[ ${EUID:-$(id -u)} -eq 0 ]] || { echo "Run with sudo: sudo ./uninstall.sh" >&2; exit 1; }
 
-if [[ -x /usr/local/bin/gre-manager ]]; then
+if [[ -x /usr/local/bin/gre-manager ]] && /usr/local/bin/gre-manager help 2>&1 | grep -Fq 'uninstall'; then
   if [[ ${1:-} == --keep-config ]]; then
     exec /usr/local/bin/gre-manager uninstall --keep-config
   fi

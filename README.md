@@ -1,6 +1,6 @@
 ![RIZAY Tunnel Manager](assets/rizay-logo.svg)
 
-# RIZAY Tunnel Manager v6.1.0
+# RIZAY Tunnel Manager v6.1.1
 
 نصب مرحله‌به‌مرحله GRE، IPv6 خصوصی و GOST نسخه ۲ بین `IRAN` و `KHAREJ`؛ با پنل عددی آبی و پورت‌های جداشده با `,`.
 
