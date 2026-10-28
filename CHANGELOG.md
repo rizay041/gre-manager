@@ -1,5 +1,11 @@
 # Changelog
 
+## 6.1.4 - 2026-10-28
+
+- Make standalone `uninstall.sh` independent from the installed binary and safe with broken profiles.
+- Remove RIZAY iptables chains and tunnel interfaces during purge, even if configuration validation fails.
+- Preserve `/etc/gre-manager` when using `--keep-config` from the standalone remover.
+
 ## 6.1.3 - 2026-10-28
 
 - Allow `REMOVE RIZAY completely` and `uninstall --purge` to finish even when the saved profile has an invalid or empty role.
