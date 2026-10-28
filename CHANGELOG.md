@@ -1,5 +1,10 @@
 # Changelog
 
+## 6.1.3 - 2026-10-28
+
+- Allow `REMOVE RIZAY completely` and `uninstall --purge` to finish even when the saved profile has an invalid or empty role.
+- Stop services and remove all RIZAY files without validating a broken configuration first.
+
 ## 6.1.2 - 2026-10-28
 
 - Prevent incomplete old settings from crashing the installer or live dashboard with `role must be IRAN or KHAREJ`.

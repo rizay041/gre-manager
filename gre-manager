@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly VERSION="6.1.2"
+readonly VERSION="6.1.3"
 readonly CONFIG_DIR="${GRE_MANAGER_CONFIG_DIR:-/etc/gre-manager}"
 readonly CONFIG_FILE="$CONFIG_DIR/config.conf"
 readonly RULES_FILE="$CONFIG_DIR/rules.conf"
@@ -1363,8 +1363,8 @@ uninstall_stack() {
   elif (( purge == 0 )); then
     ui_confirm "RIZAY - Remove everything" "Stop all RIZAY services and permanently remove the program and its saved configuration?" || return 0
   fi
-  if [[ -r $CONFIG_FILE ]]; then
-    load_config || true
+  if config_is_valid; then
+    load_config
     stop_tunnel >/dev/null 2>&1 || true
     stop_private >/dev/null 2>&1 || true
   fi
