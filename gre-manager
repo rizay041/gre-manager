@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly VERSION="6.0.0"
+readonly VERSION="6.1.0"
 readonly CONFIG_DIR="${GRE_MANAGER_CONFIG_DIR:-/etc/gre-manager}"
 readonly CONFIG_FILE="$CONFIG_DIR/config.conf"
 readonly RULES_FILE="$CONFIG_DIR/rules.conf"
@@ -1283,6 +1283,100 @@ status() {
   fi
 }
 
+dashboard_color() {
+  local name=$1
+  if [[ -t 1 ]]; then
+    case "$name" in
+      cyan) printf '\033[1;96m' ;; blue) printf '\033[1;94m' ;;
+      green) printf '\033[1;92m' ;; yellow) printf '\033[1;93m' ;;
+      red) printf '\033[1;91m' ;; dim) printf '\033[2;37m' ;;
+      reset) printf '\033[0m' ;; *) printf '' ;;
+    esac
+  fi
+}
+
+dashboard() {
+  require_root dashboard
+  local gre_state="OFF" private_state="OFF" gost_state="OFF" role="-" mode="-"
+  local gre_color=red private_color=red gost_color=red rules_count=0 gost_rules=0 ready=0
+  local public_path="-" private_path="-"
+  if [[ ! -r $CONFIG_FILE ]]; then
+    printf '%b╭────────────────────────────────────────────────────────────────────╮%b\n' "$(dashboard_color cyan)" "$(dashboard_color reset)"
+    printf '%b│  RIZAY LIVE DASHBOARD  │  SETUP REQUIRED                           │%b\n' "$(dashboard_color cyan)" "$(dashboard_color reset)"
+    printf '%b│  Choose 1) IRAN or 2) KHAREJ from the main menu to begin.          │%b\n' "$(dashboard_color yellow)" "$(dashboard_color reset)"
+    printf '%b╰────────────────────────────────────────────────────────────────────╯%b\n\n' "$(dashboard_color cyan)" "$(dashboard_color reset)"
+    return 0
+  fi
+  load_config
+  role=${ROLE^^}; mode=${MODE^^}
+  if [[ $MODE == gost ]]; then
+    gre_state="DISABLED"
+    gre_color=dim
+  elif ip link show "$IFACE" >/dev/null 2>&1; then
+    gre_state="UP"
+    gre_color=green
+    ready=$((ready+1))
+  fi
+  if [[ $PRIVATE_ENABLED == yes ]]; then
+    private_state="DOWN"
+    if ip link show "$PRIVATE_IFACE" >/dev/null 2>&1; then private_state="UP"; private_color=green; ready=$((ready+1)); fi
+  else
+    private_state="OFF"; private_color=dim
+  fi
+  if systemctl is-active --quiet "$GOST_SERVICE" 2>/dev/null; then gost_state="ACTIVE"; gost_color=green; ready=$((ready+1)); fi
+  if [[ -s $RULES_FILE ]]; then rules_count=$(awk '!/^($|#)/ { count++ } END { print count+0 }' "$RULES_FILE"); fi
+  if [[ -s $GOST_RULES_FILE ]]; then gost_rules=$(awk '!/^($|#)/ { count++ } END { print count+0 }' "$GOST_RULES_FILE"); fi
+  public_path="$IRAN_IP  ->  $KHAREJ_IP"
+  private_path="$PRIVATE_LOCAL  ->  $PRIVATE_REMOTE"
+  printf '%b╭────────────────────────────────────────────────────────────────────╮%b\n' "$(dashboard_color cyan)" "$(dashboard_color reset)"
+  printf '%b│  RIZAY LIVE DASHBOARD  │  v%-8s  │  %-5s / %-6s                  │%b\n' "$(dashboard_color cyan)" "$VERSION" "$role" "$mode" "$(dashboard_color reset)"
+  printf '%b├────────────────────────┬────────────────────────┬──────────────────┤%b\n' "$(dashboard_color blue)" "$(dashboard_color reset)"
+  printf '%b│ GRE                    │ PRIVATE IPv6           │ GOST v2          │%b\n' "$(dashboard_color blue)" "$(dashboard_color reset)"
+  printf '│ %b%-22s%b │ %b%-22s%b │ %b%-16s%b │\n' "$(dashboard_color $gre_color)" "$gre_state" "$(dashboard_color reset)" "$(dashboard_color $private_color)" "$private_state" "$(dashboard_color reset)" "$(dashboard_color $gost_color)" "$gost_state" "$(dashboard_color reset)"
+  printf '%b├────────────────────────┴────────────────────────┴──────────────────┤%b\n' "$(dashboard_color blue)" "$(dashboard_color reset)"
+  printf '│ Public path : %-52s │\n' "$public_path"
+  printf '│ Private path: %-52s │\n' "$private_path"
+  printf '│ Rules       : GRE %-5s | GOST %-5s | Ready %-2s/3                 │\n' "$rules_count" "$gost_rules" "$ready"
+  printf '%b╰────────────────────────────────────────────────────────────────────╯%b\n' "$(dashboard_color cyan)" "$(dashboard_color reset)"
+  printf '%b  1 IRAN  2 KHAREJ  3 PORTS  5 HEALTH  6 MANAGE  7 SERVICES  10 PRIVATE  11 REMOVE%b\n\n' "$(dashboard_color dim)" "$(dashboard_color reset)"
+}
+
+uninstall_stack() {
+  require_root uninstall
+  local keep_config=0 purge=0
+  [[ ${1:-} == --keep-config ]] && keep_config=1
+  [[ ${1:-} == --purge ]] && purge=1
+  if (( keep_config == 1 )); then
+    ui_confirm "RIZAY - Remove program" "Stop services and remove the program, but keep /etc/gre-manager for later reinstall?" || return 0
+  elif (( purge == 0 )); then
+    ui_confirm "RIZAY - Remove everything" "Stop all RIZAY services and permanently remove the program and its saved configuration?" || return 0
+  fi
+  if [[ -r $CONFIG_FILE ]]; then
+    load_config || true
+    stop_tunnel >/dev/null 2>&1 || true
+    stop_private >/dev/null 2>&1 || true
+  fi
+  release_lock
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl disable --now gre-manager.service rizay-gost.service rizay-private.service \
+      rizay-private-keepalive.timer rizay-private-keepalive.service >/dev/null 2>&1 || true
+  fi
+  rm -f -- /etc/systemd/system/gre-manager.service /etc/systemd/system/rizay-gost.service \
+    /etc/systemd/system/rizay-private.service /etc/systemd/system/rizay-private-keepalive.service \
+    /etc/systemd/system/rizay-private-keepalive.timer
+  rm -f -- /etc/systemd/system/multi-user.target.wants/gre-manager.service \
+    /etc/systemd/system/multi-user.target.wants/rizay-gost.service \
+    /etc/systemd/system/multi-user.target.wants/rizay-private.service \
+    /etc/systemd/system/timers.target.wants/rizay-private-keepalive.timer
+  rm -f -- "$GOST_BIN" /usr/local/bin/gre-manager /etc/sysctl.d/99-rizay-tunnel.conf
+  rmdir "$(dirname "$GOST_BIN")" 2>/dev/null || true
+  if (( keep_config == 0 )); then rm -rf -- "$CONFIG_DIR"; fi
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  printf 'RIZAY removed successfully.\n'
+  (( keep_config == 0 )) && printf 'Configuration and backups were removed too.\n' || printf 'Configuration kept in %s.\n' "$CONFIG_DIR"
+  exit 0
+}
+
 optimize_network() {
   require_root optimize
   local bbr=0 tmp
@@ -1395,15 +1489,17 @@ menu() {
   while true; do
     clear 2>/dev/null || true
     banner
+    dashboard || true
     choice=$(ui_menu "RIZAY Tunnel Manager v$VERSION" "Select a number. Installation is step by step." \
       1 "IRAN - setup IPs and comma-separated ports" \
       2 "KHAREJ - setup the destination server" \
       3 "Add or change ports" 4 "Status and saved ports" \
       5 "Health Center - packet loss and Doctor" 6 "Port Manager" \
       7 "Tunnel Center - start / stop / restart" 8 "Maintenance and optimization" \
-      9 "About RIZAY / @rizay_041" 10 "PRIVATE IPv6 - status / repair / extra addresses" 0 "Exit") || return 0
+      9 "About RIZAY / @rizay_041" 10 "PRIVATE IPv6 - status / repair / extra addresses" \
+      11 "REMOVE RIZAY completely" 0 "Exit") || return 0
     case "$choice" in
-      1|2|9|0) ;;
+      1|2|9|0|11) ;;
       *) if [[ ! -r $CONFIG_FILE ]]; then
            ui_message "RIZAY - Setup first" "Choose 1) IRAN or 2) KHAREJ to configure this server first."
            continue
@@ -1415,8 +1511,9 @@ menu() {
       5) health_menu ;; 6) port_menu ;; 7) tunnel_menu ;; 8) maintenance_menu ;;
       9) about ;; 0) return 0 ;;
       10) private_menu ;;
+      11) uninstall_stack ;;
     esac
-    case "$choice" in 5|6|7|8|10) ;; *) pause_menu ;; esac
+    case "$choice" in 5|6|7|8|10|11) ;; *) pause_menu ;; esac
   done
 }
 
@@ -1443,6 +1540,8 @@ Usage: gre-manager COMMAND [ARGS]
   private                    Private IPv6 status / repair / address pairs
   start-private|stop-private Control the SIT IPv6 interface
   private-keepalive           Ping the private IPv6 peer
+  dashboard                   Show the live colored dashboard
+  uninstall [--keep-config]   Remove RIZAY services, binary and configuration
   gost-logs [LINES]          Show GOST service logs
   firewall                   Show live iptables packet/byte counters
   clear-rules                Remove all forwarding rules
@@ -1461,6 +1560,7 @@ main() {
     start-gre) start_tunnel ;; stop-gre) stop_tunnel ;;
     start-private) start_private ;; stop-private) stop_private ;; private) private_menu ;;
     private-keepalive) private_keepalive ;;
+    dashboard) dashboard ;; uninstall) shift; uninstall_stack "${1:-}" ;;
     repair) repair ;; status) shift; status "${1:-}" ;; add-rule) shift; add_rule "$@" ;;
     remove-rule) shift; remove_rule "$@" ;; list-rules) list_rules ;; firewall) firewall_rules ;;
     clear-rules) clear_rules ;; add-gost) shift; add_gost_rule "$@" ;;

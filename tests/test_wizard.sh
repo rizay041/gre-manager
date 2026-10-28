@@ -128,6 +128,7 @@ check "invalid batch leaves saved files unchanged" equals "$before" "$after"
 reset_state
 menu <<< $'1\n203.0.113.10\n198.51.100.20\n443,8443\n1\n1\n1\n0' > "$OUTPUT" 2>&1
 check "main panel offers numeric IRAN setup" grep -Fq '1) IRAN - setup IPs' "$OUTPUT"
+check "main panel shows the live dashboard" grep -Fq 'RIZAY LIVE DASHBOARD' "$OUTPUT"
 check "complete main-panel flow saves both ports" has_lines "$GOST_RULES_FILE" 2
 
 reset_state

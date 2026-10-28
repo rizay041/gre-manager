@@ -1,5 +1,13 @@
 # Changelog
 
+## 6.1.0 - 2026-10-28
+
+- Add a live colored dashboard with GRE, PRIVATE IPv6, GOST and rule cards.
+- Add `REMOVE RIZAY completely` to the main numbered menu.
+- Add `gre-manager uninstall` and `gre-manager uninstall --keep-config`.
+- Make `uninstall.sh` purge by default and delegate to the installed remover.
+- Stop and remove all tunnels, services, timers, unit links, binaries and sysctl state during removal.
+
 ## 6.0.0 - 2026-10-14
 
 - Switch to checksum-verified official GOST v2.12.0 with native ServeNodes JSON configuration.

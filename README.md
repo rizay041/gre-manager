@@ -1,6 +1,6 @@
 ![RIZAY Tunnel Manager](assets/rizay-logo.svg)
 
-# RIZAY Tunnel Manager v6.0.0
+# RIZAY Tunnel Manager v6.1.0
 
 نصب مرحله‌به‌مرحله GRE، IPv6 خصوصی و GOST نسخه ۲ بین `IRAN` و `KHAREJ`؛ با پنل عددی آبی و پورت‌های جداشده با `,`.
 
@@ -25,6 +25,7 @@ curl -fsSL https://raw.githubusercontent.com/rizay041/gre-manager/main/quick-ins
 8) Maintenance and optimization
 9) About RIZAY / @rizay_041
 10) PRIVATE IPv6 - status / repair / extra addresses
+11) REMOVE RIZAY completely
 0) Exit
 ```
 
@@ -84,6 +85,19 @@ sudo gre-manager
 - گزینه `7`: Start، Stop و Restart.
 - گزینه `8`: Repair و بهینه‌سازی اختیاری شبکه.
 - گزینه `10`: وضعیت، تعمیر و آدرس‌های IPv6 خصوصی.
+- گزینه `11`: حذف کامل RIZAY، سرویس‌ها، تونل‌ها، باینری و تنظیمات.
+
+برای حذف کامل از داخل پنل عدد `11` را بزن. اگر فقط برنامه را می‌خواهی حذف کنی و تنظیمات برای نصب بعدی بماند، از دستور زیر استفاده کن:
+
+```bash
+sudo gre-manager uninstall --keep-config
+```
+
+حذف کامل مستقیم:
+
+```bash
+sudo gre-manager uninstall --purge
+```
 
 امتیاز آمادگی یک گزارش تشخیصی است. برای مقایسه دوطرفه، Health را روی هر دو سرور اجرا کن. تنظیمات پیش‌فرض GRE: `10.77.0.1/30` در ایران، `10.77.0.2/30` در خارج و MTU برابر `1400`.
 
@@ -101,6 +115,8 @@ Run the one-line installer above on both Linux/systemd servers. The numbered pan
 4. Review the summary and confirm with `1`. GRE, private IPv6, and the selected forwarding ports start automatically.
 
 Use `sudo gre-manager` to reopen the panel. Option `3` adds or updates comma-separated ports, with optional matching destination ports. Other rules are preserved. Cancelling setup applies no changes.
+
+Every panel screen starts with the colored `RIZAY LIVE DASHBOARD`: it shows real GRE, PRIVATE IPv6 and GOST v2 state, public/private paths, saved rule counts and a ready score. Choose `11) REMOVE RIZAY completely` to stop and remove the tunnels, services, timers, binaries and firewall state. For a reinstall that keeps settings, use `sudo gre-manager uninstall --keep-config`; for a clean wipe, use `sudo gre-manager uninstall --purge` or `sudo ./uninstall.sh`.
 
 Private IPv6 is built automatically using SIT over the public IPv4 endpoints. The address scheme matches the PrivateIP reference: IRAN `fd1d:fc98:b73e:b481::2`, KHAREJ `fd1d:fc98:b73e:b481::1`. Allow IPv4 Protocol 41 between the endpoints. No native public IPv6 is required.
 
