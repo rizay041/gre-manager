@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly VERSION="6.1.1"
+readonly VERSION="6.1.2"
 readonly CONFIG_DIR="${GRE_MANAGER_CONFIG_DIR:-/etc/gre-manager}"
 readonly CONFIG_FILE="$CONFIG_DIR/config.conf"
 readonly RULES_FILE="$CONFIG_DIR/rules.conf"
@@ -251,6 +251,11 @@ load_config() {
     esac
   done < "$CONFIG_FILE"
   validate_config
+}
+
+config_is_valid() {
+  [[ -r $CONFIG_FILE ]] || return 1
+  (load_config >/dev/null 2>&1)
 }
 
 save_config() {
@@ -1307,6 +1312,13 @@ dashboard() {
     printf '%b╰────────────────────────────────────────────────────────────────────╯%b\n\n' "$(dashboard_color cyan)" "$(dashboard_color reset)"
     return 0
   fi
+  if ! config_is_valid; then
+    printf '%b╭────────────────────────────────────────────────────────────────────╮%b\n' "$(dashboard_color yellow)" "$(dashboard_color reset)"
+    printf '%b│  RIZAY LIVE DASHBOARD  │  CONFIGURATION NEEDS RESET                │%b\n' "$(dashboard_color yellow)" "$(dashboard_color reset)"
+    printf '%b│  Saved settings are incomplete. Choose 1) IRAN or 2) KHAREJ.       │%b\n' "$(dashboard_color yellow)" "$(dashboard_color reset)"
+    printf '%b╰────────────────────────────────────────────────────────────────────╯%b\n\n' "$(dashboard_color yellow)" "$(dashboard_color reset)"
+    return 0
+  fi
   load_config
   role=${ROLE^^}; mode=${MODE^^}
   if [[ $MODE == gost ]]; then
@@ -1500,8 +1512,8 @@ menu() {
       11 "REMOVE RIZAY completely" 0 "Exit") || return 0
     case "$choice" in
       1|2|9|0|11) ;;
-      *) if [[ ! -r $CONFIG_FILE ]]; then
-           ui_message "RIZAY - Setup first" "Choose 1) IRAN or 2) KHAREJ to configure this server first."
+      *) if ! config_is_valid; then
+           ui_message "RIZAY - Setup first" "Saved settings are missing or incomplete. Choose 1) IRAN or 2) KHAREJ to configure this server."
            continue
          fi ;;
     esac

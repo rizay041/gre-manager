@@ -48,8 +48,16 @@ install -m 644 "$SCRIPT_DIR/rizay-private-keepalive.timer" /etc/systemd/system/r
 systemctl daemon-reload
 systemctl enable gre-manager.service >/dev/null
 if [[ -r /etc/gre-manager/config.conf && -s /etc/gre-manager/gost-rules.conf ]]; then
-  echo "Upgrading saved GOST rules to verified GOST v2.12.0..."
-  /usr/local/bin/gre-manager sync-gost
+  if /usr/local/bin/gre-manager status >/dev/null 2>&1; then
+    echo "Upgrading saved GOST rules to verified GOST v2.12.0..."
+    /usr/local/bin/gre-manager sync-gost
+  else
+    install -d -m 700 /etc/gre-manager/backup
+    invalid_backup="/etc/gre-manager/backup/config.invalid.$(date +%Y%m%d%H%M%S)"
+    cp -p /etc/gre-manager/config.conf "$invalid_backup"
+    echo "Existing RIZAY settings are incomplete; saved a backup at $invalid_backup."
+    echo "Open the panel and choose 1) IRAN or 2) KHAREJ to configure this server."
+  fi
 fi
 
 echo "RIZAY Tunnel Manager installed (GRE + PRIVATE IPv6 + GOST v2 ready)."

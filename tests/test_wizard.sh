@@ -137,6 +137,11 @@ check "unconfigured status returns to the menu" grep -Fq 'Setup first' "$OUTPUT"
 check "unconfigured status does not create config" absent "$CONFIG_FILE"
 
 reset_state
+printf 'ROLE=\nMODE=hybrid\nIRAN_IP=203.0.113.10\nKHAREJ_IP=198.51.100.20\nMTU=1400\nPRIVATE_ENABLED=no\nPRIVATE_COUNT=1\n' > "$CONFIG_FILE"
+dashboard > "$OUTPUT" 2>&1
+check "invalid saved role does not crash the dashboard" grep -Fq 'CONFIGURATION NEEDS RESET' "$OUTPUT"
+
+reset_state
 wizard iran <<< $'203.0.113.10\n198.51.100.20\n2027,443\n3\n1\n1' > "$OUTPUT" 2>&1
 check "recommended setup creates TCP and UDP on private IPv6" has_lines "$GOST_RULES_FILE" 4
 check "recommended rule selects private IPv6" grep -Fxq 'tcp 2027 2027 private' "$GOST_RULES_FILE"

@@ -1,5 +1,11 @@
 # Changelog
 
+## 6.1.2 - 2026-10-28
+
+- Prevent incomplete old settings from crashing the installer or live dashboard with `role must be IRAN or KHAREJ`.
+- Detect invalid saved profiles, keep a timestamped backup, and return users to the numbered IRAN/KHAREJ setup.
+- Add regression coverage for invalid saved roles.
+
 ## 6.1.1 - 2026-10-28
 
 - Make `uninstall.sh` fall back to direct cleanup when an older installed binary has no uninstall command.
